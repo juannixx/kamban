@@ -5,6 +5,8 @@ export class MemoryFs implements FileSystem {
   files = new Map<string, { content: string; mtime: number }>();
   dirs = new Set<string>();
   failWrites = false;
+  /** Caminhos cuja leitura deve lançar erro, para simular falhas de I/O em testes. */
+  failReads = new Set<string>();
   private clock = 0;
 
   private get(path: string) {
@@ -18,6 +20,7 @@ export class MemoryFs implements FileSystem {
   }
 
   async readText(path: string) {
+    if (this.failReads.has(path)) throw new Error(`EIO: read failed: ${path}`);
     return this.get(path).content;
   }
 

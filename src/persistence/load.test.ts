@@ -59,4 +59,13 @@ describe("loadData", () => {
     await fs.writeText("/d/kamban.json", "{");
     expect(await loadData(fs, "/d")).toMatchObject({ status: "error", error: "invalid-json" });
   });
+
+  it("retorna read-failed em vez de lançar quando a leitura do arquivo falha", async () => {
+    const fs = new MemoryFs();
+    await fs.mkdir("/d");
+    await fs.writeText("/d/kamban.json", JSON.stringify(initial()));
+    fs.failReads.add("/d/kamban.json");
+
+    expect(await loadData(fs, "/d")).toMatchObject({ status: "error", error: "read-failed" });
+  });
 });

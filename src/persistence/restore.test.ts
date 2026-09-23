@@ -45,4 +45,17 @@ describe("restoreLatestBackup", () => {
     expect(await fs.readText("/data/kamban.json")).toBe("{ corrompido");
     expect(await fs.exists(`/data/backups/kamban-quarentena-${STAMP}.json`)).toBe(false);
   });
+
+  it("pula um backup cuja leitura falha e tenta o próximo", async () => {
+    const fs = new MemoryFs();
+    await fs.mkdir("/data");
+    await fs.mkdir("/data/backups");
+    await fs.writeText("/data/backups/kamban-2026-09-22.json", serialize(initial()));
+    await fs.writeText("/data/backups/kamban-2026-09-23.json", serialize(initial()));
+    fs.failReads.add("/data/backups/kamban-2026-09-23.json");
+
+    const outcome = await restoreLatestBackup(fs, "/data", STAMP);
+
+    expect(outcome).toMatchObject({ status: "ok", data: initial(), backup: "kamban-2026-09-22.json" });
+  });
 });

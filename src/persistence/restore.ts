@@ -27,7 +27,13 @@ async function quarantineCurrentFile(fs: FileSystem, dir: string, stamp: string)
  */
 export async function restoreLatestBackup(fs: FileSystem, dir: string, stamp: string): Promise<RestoreOutcome> {
   for (const name of await listBackups(fs, dir)) {
-    const result = parseData(await fs.readText(joinPath(dir, BACKUP_DIR, name)));
+    let text: string;
+    try {
+      text = await fs.readText(joinPath(dir, BACKUP_DIR, name));
+    } catch {
+      continue; // backup ilegível: tenta o próximo
+    }
+    const result = parseData(text);
     if (result.ok) {
       await quarantineCurrentFile(fs, dir, stamp);
       const mtime = await writeAtomic(fs, dir, serialize(result.data));

@@ -2,7 +2,7 @@ import { z } from "zod";
 import { CURRENT_VERSION, kambanDataSchema, type KambanData } from "../domain/schema";
 import { DATA_FILE, joinPath, type FileSystem } from "./fs";
 
-export type LoadError = "invalid-json" | "invalid-schema" | "future-version";
+export type LoadError = "invalid-json" | "invalid-schema" | "future-version" | "read-failed";
 
 export type ParseResult = { ok: true; data: KambanData } | { ok: false; error: LoadError; message: string };
 
@@ -64,7 +64,14 @@ export async function loadData(fs: FileSystem, dir: string): Promise<LoadOutcome
   const path = joinPath(dir, DATA_FILE);
   if (!(await fs.exists(path))) return { status: "missing" };
 
-  const result = parseData(await fs.readText(path));
+  let text: string;
+  try {
+    text = await fs.readText(path);
+  } catch (error) {
+    return { status: "error", error: "read-failed", message: String(error) };
+  }
+
+  const result = parseData(text);
   if (!result.ok) return { status: "error", error: result.error, message: result.message };
   return { status: "ok", data: result.data, mtime: await fs.mtime(path) };
 }
