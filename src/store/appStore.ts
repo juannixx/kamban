@@ -232,6 +232,7 @@ export function createAppStore(deps: AppDeps): AppStore {
     }
 
     async function checkExternalChange() {
+      if (get().conflict) return;
       const dir = get().dataDir;
       if (!dir || get().phase !== "ready" || get().saveStatus === "saving") return;
       let mtime: number;
@@ -273,7 +274,7 @@ export function createAppStore(deps: AppDeps): AppStore {
       async openFolder(dir) {
         set({ phase: "booting" });
         await scheduler?.flush();
-        if (scheduler?.hasPendingChanges() && get().dataDir) {
+        if (get().hasPendingChanges() && get().dataDir) {
           set({
             phase: "ready",
             notice: "Não foi possível salvar as alterações na pasta atual. A troca de pasta foi cancelada.",
@@ -329,7 +330,7 @@ export function createAppStore(deps: AppDeps): AppStore {
         await scheduler?.flush();
       },
 
-      hasPendingChanges: () => scheduler?.hasPendingChanges() ?? false,
+      hasPendingChanges: () => get().conflict || (scheduler?.hasPendingChanges() ?? false),
 
       async onFocus() {
         get().refreshToday();

@@ -222,8 +222,9 @@ describe("proteções contra perda de dados", () => {
     await state().openFolder(DIR);
     state().renameBoard("id-1", "Do app");
     await externalEdit(fs, "Do disco");
-    await state().onFocus();
+    await state().flush();
     expect(state().conflict).toBe(true);
+    expect(state().lastSaveFailed).toBe(true);
 
     await new Promise((r) => setTimeout(r, 30));
     expect(getBoard(await readFile(fs), "id-1").name).toBe("Do disco");
@@ -316,5 +317,45 @@ describe("proteções contra perda de dados", () => {
     await store.getState().openFolder(DIR);
     expect(store.getState().phase).toBe("ready");
     expect(store.getState().notice).toContain("Não foi possível lembrar a pasta escolhida");
+  });
+
+  it("duas onFocus seguidas durante um conflito não resolvem sozinhas a favor do disco", async () => {
+    const { fs, state } = await setup({ debounceMs: 60_000 });
+    await state().openFolder(DIR);
+    state().renameBoard("id-1", "Do app");
+    await externalEdit(fs, "Do disco");
+    await state().onFocus();
+    expect(state().conflict).toBe(true);
+
+    await state().onFocus();
+    expect(state().conflict).toBe(true);
+    expect(getBoard(state().data, "id-1").name).toBe("Do app");
+    expect(getBoard(await readFile(fs), "id-1").name).toBe("Do disco");
+  });
+
+  it("hasPendingChanges() continua verdadeiro durante um conflito", async () => {
+    const { fs, state } = await setup({ debounceMs: 60_000 });
+    await state().openFolder(DIR);
+    state().renameBoard("id-1", "Do app");
+    await externalEdit(fs, "Do disco");
+    await state().onFocus();
+    expect(state().conflict).toBe(true);
+    expect(state().hasPendingChanges()).toBe(true);
+  });
+
+  it("trocar de pasta durante um conflito é cancelado", async () => {
+    const { fs, state } = await setup({ debounceMs: 60_000 });
+    await state().openFolder(DIR);
+    state().renameBoard("id-1", "Do app");
+    await externalEdit(fs, "Do disco");
+    await state().onFocus();
+    expect(state().conflict).toBe(true);
+
+    await state().openFolder("/outra");
+    expect(state().dataDir).toBe(DIR);
+    expect(state().conflict).toBe(true);
+    expect(state().notice).toBe(
+      "Não foi possível salvar as alterações na pasta atual. A troca de pasta foi cancelada.",
+    );
   });
 });
