@@ -3,7 +3,7 @@ import { z } from "zod";
 export const CURRENT_VERSION = 1;
 
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Data deve estar no formato YYYY-MM-DD");
-const isoDateTime = z.string().datetime();
+const isoDateTime = z.iso.datetime();
 
 export const columnSchema = z.object({
   id: z.string().min(1),
