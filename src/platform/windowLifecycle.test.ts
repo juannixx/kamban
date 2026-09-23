@@ -74,6 +74,33 @@ describe("attachWindowLifecycle", () => {
     expect(onFocus).toHaveBeenCalledOnce();
   });
 
+  it("ao perder o foco grava o que falta", async () => {
+    const fs = new MemoryFs();
+    const { store } = await readyStore(fs);
+    const w = fakeWindow();
+    const commitDrafts = vi.fn();
+    stop = await attachWindowLifecycle(store, w.win, async () => true, 60_000, commitDrafts);
+    store.getState().renameBoard("id-1", "Trocou de app");
+    w.focus(false);
+    expect(commitDrafts).toHaveBeenCalledOnce();
+    await vi.waitFor(async () => expect(await fs.readText("/data/kamban.json")).toContain("Trocou de app"));
+  });
+
+  it("ao fechar confirma os rascunhos antes de gravar", async () => {
+    const fs = new MemoryFs();
+    const { store } = await readyStore(fs);
+    const w = fakeWindow();
+    const confirmClose = vi.fn(async () => true);
+    const commitDrafts = vi.fn(() => {
+      store.getState().renameBoard("id-1", "Rascunho digitado");
+    });
+    stop = await attachWindowLifecycle(store, w.win, confirmClose, 60_000, commitDrafts);
+    expect(await w.requestClose()).toBe(false);
+    expect(commitDrafts).toHaveBeenCalledOnce();
+    expect(await fs.readText("/data/kamban.json")).toContain("Rascunho digitado");
+    expect(confirmClose).not.toHaveBeenCalled();
+  });
+
   describe("virada do dia", () => {
     beforeEach(() => {
       vi.useFakeTimers();
