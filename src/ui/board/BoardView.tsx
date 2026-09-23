@@ -1,5 +1,4 @@
 import {
-  closestCorners,
   DndContext,
   KeyboardSensor,
   PointerSensor,
@@ -15,7 +14,7 @@ import { useApp, usePlatform } from "../context";
 import { InlineEdit } from "../InlineEdit";
 import { btn } from "../styles";
 import { ColumnView } from "./ColumnView";
-import { columnDndId, parseDndId, resolveCardDrop, resolveColumnDrop } from "./dnd";
+import { boardCollisionDetection, columnDndId, parseDndId, resolveCardDrop, resolveColumnDrop } from "./dnd";
 import { NewColumnForm } from "./NewColumnForm";
 
 export function BoardView({ boardId }: { boardId: string }) {
@@ -52,7 +51,7 @@ export function BoardView({ boardId }: { boardId: string }) {
   return (
     <div className="flex h-full flex-col">
       <BoardHeader board={board} />
-      <DndContext sensors={sensors} collisionDetection={closestCorners} onDragEnd={handleDragEnd}>
+      <DndContext sensors={sensors} collisionDetection={boardCollisionDetection} onDragEnd={handleDragEnd}>
         <SortableContext items={columns.map((c) => columnDndId(c.id))} strategy={horizontalListSortingStrategy}>
           <div className="flex flex-1 items-start gap-4 overflow-x-auto p-6">
             {columns.map((column) => (

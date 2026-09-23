@@ -3,7 +3,7 @@ import { createInitialData } from "../../domain/boards";
 import { addCard, cardsInColumn, moveCard } from "../../domain/cards";
 import type { KambanData } from "../../domain/schema";
 import { NOW } from "../../domain/testing";
-import { cardDndId, columnDndId, parseDndId, resolveCardDrop, resolveColumnDrop } from "./dnd";
+import { cardDndId, columnDndId, parseDndId, pickBoardCollision, resolveCardDrop, resolveColumnDrop } from "./dnd";
 
 // Colunas: c1 (A fazer: A, B, C), c2 (Fazendo: X), c3 (Feito)
 function data(): KambanData {
@@ -63,5 +63,35 @@ describe("resolveColumnDrop", () => {
     expect(resolveColumnDrop(data(), ["c1", "c2", "c3"], "c1", null)).toBeNull();
     expect(resolveColumnDrop(data(), ["c1", "c2", "c3"], "c1", columnDndId("c1"))).toBeNull();
     expect(resolveColumnDrop(data(), ["c1", "c2", "c3"], "c1", cardDndId("B"))).toBeNull();
+  });
+});
+
+describe("pickBoardCollision", () => {
+  const hit = (id: string) => ({ id });
+  const ids = (hits: { id: string }[]) => hits.map((h) => h.id);
+  const never = () => {
+    throw new Error("não devia usar o fallback");
+  };
+
+  it("cartão: o ponteiro sobre um cartão ganha da coluna em volta", () => {
+    const hits = [hit(columnDndId("c2")), hit(cardDndId("X"))];
+    expect(ids(pickBoardCollision("card", hits, never))).toEqual([cardDndId("X")]);
+  });
+
+  it("cartão: o ponteiro só sobre a coluna escolhe a coluna (solta no fim)", () => {
+    expect(ids(pickBoardCollision("card", [hit(columnDndId("c3"))], never))).toEqual([columnDndId("c3")]);
+  });
+
+  it("cartão: o ponteiro fora de tudo usa o fallback", () => {
+    const fallback = () => [hit(cardDndId("B")), hit(columnDndId("c1"))];
+    expect(ids(pickBoardCollision("card", [], fallback))).toEqual([cardDndId("B"), columnDndId("c1")]);
+  });
+
+  it("coluna: só considera colunas, na ordem do fallback", () => {
+    const fallback = () => [hit(cardDndId("A")), hit(columnDndId("c2")), hit(cardDndId("X")), hit(columnDndId("c1"))];
+    expect(ids(pickBoardCollision("column", [hit(cardDndId("A"))], fallback))).toEqual([
+      columnDndId("c2"),
+      columnDndId("c1"),
+    ]);
   });
 });

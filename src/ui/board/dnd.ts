@@ -1,3 +1,4 @@
+import { closestCorners, pointerWithin, type CollisionDetection, type UniqueIdentifier } from "@dnd-kit/core";
 import { cardsInColumn } from "../../domain/cards";
 import type { KambanData } from "../../domain/schema";
 
@@ -48,3 +49,30 @@ export function resolveColumnDrop(
   if (moved) next.splice(to, 0, moved);
   return next;
 }
+
+const isType = (type: "card" | "column") => (hit: { id: UniqueIdentifier }) => parseDndId(hit.id)?.type === type;
+
+/**
+ * Escolhe o alvo do arraste no quadro.
+ * Cartão: o que está sob o ponteiro (cartão antes de coluna); fora de tudo, o fallback.
+ * Coluna: só colunas contam, na ordem do fallback.
+ */
+export function pickBoardCollision<C extends { id: UniqueIdentifier }>(
+  activeType: "card" | "column",
+  pointerHits: C[],
+  fallback: () => C[],
+): C[] {
+  if (activeType === "column") return fallback().filter(isType("column"));
+  const card = pointerHits.find(isType("card"));
+  if (card) return [card];
+  const column = pointerHits.find(isType("column"));
+  if (column) return [column];
+  return fallback();
+}
+
+/** Detecção de colisão do quadro: pointerWithin primeiro, closestCorners como reserva. */
+export const boardCollisionDetection: CollisionDetection = (args) => {
+  const activeType = parseDndId(args.active.id)?.type ?? "card";
+  const pointerHits = activeType === "card" ? pointerWithin(args) : [];
+  return pickBoardCollision(activeType, pointerHits, () => closestCorners(args));
+};
