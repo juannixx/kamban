@@ -425,6 +425,86 @@ describe("kamban.json ausente numa pasta que já tem dados", () => {
   });
 });
 
+/**
+ * Imita o escopo do Tauri ($HOME com require_literal_leading_dot): qualquer caminho com um segmento
+ * começando por "." é proibido, mas listar a pasta funciona e mostra os arquivos ocultos.
+ */
+class ScopedFs extends MemoryFs {
+  private guard(path: string) {
+    if (path.split("/").some((part) => part.startsWith("."))) throw new Error(`forbidden path: ${path}`);
+  }
+  override async exists(path: string) {
+    this.guard(path);
+    return super.exists(path);
+  }
+  override async readText(path: string) {
+    this.guard(path);
+    return super.readText(path);
+  }
+  override async writeText(path: string, content: string) {
+    this.guard(path);
+    return super.writeText(path, content);
+  }
+  override async rename(from: string, to: string) {
+    this.guard(from);
+    this.guard(to);
+    return super.rename(from, to);
+  }
+  override async mtime(path: string) {
+    this.guard(path);
+    return super.mtime(path);
+  }
+  override async remove(path: string) {
+    this.guard(path);
+    return super.remove(path);
+  }
+}
+
+describe("com o escopo real do Tauri (pastas e arquivos com ponto são proibidos)", () => {
+  async function scopedSetup() {
+    const fs = new ScopedFs();
+    await fs.mkdir(DIR);
+    const store = createAppStore({ fs, settings: memorySettings(), clock: fakeClock(), debounceMs: 1 });
+    return { fs, state: () => store.getState() };
+  }
+
+  it("pasta nova e vazia fica pronta e cria o kamban.json", async () => {
+    const { fs, state } = await scopedSetup();
+    await state().openFolder(DIR);
+    expect(state().notice).toBeNull();
+    expect(state().phase).toBe("ready");
+    expect(await fs.exists("/data/kamban.json")).toBe(true);
+  });
+
+  it("pasta só com o marcador do iCloud vai para load-error com a mensagem do download pendente", async () => {
+    const { fs, state } = await scopedSetup();
+    fs.files.set("/data/.kamban.json.icloud", { content: "", mtime: 1 });
+    await state().openFolder(DIR);
+    expect(state().phase).toBe("load-error");
+    expect(state().loadError?.error).toBe("missing-with-backups");
+    expect(state().loadError?.message).toBe(
+      "O kamban.json desta pasta está no iCloud e ainda não foi baixado. Abra a pasta no Finder, espere o download terminar e toque em Tentar de novo.",
+    );
+    expect(await fs.exists("/data/kamban.json")).toBe(false);
+  });
+
+  it("pasta com backups vai para load-error com a mensagem dos backups", async () => {
+    const { fs, state } = await scopedSetup();
+    const good = await (async () => {
+      const temp = await setup();
+      await temp.state().openFolder(DIR);
+      return temp.state().data;
+    })();
+    await fs.mkdir("/data/backups");
+    await fs.writeText("/data/backups/kamban-2026-09-22.json", serialize(good));
+    await state().openFolder(DIR);
+    expect(state().phase).toBe("load-error");
+    expect(state().loadError?.message).toBe(
+      "O kamban.json não está nesta pasta, mas existem backups. Se a pasta está no iCloud, o arquivo pode ainda não ter sido baixado: abra a pasta no Finder, espere o download e tente de novo, ou restaure o último backup.",
+    );
+  });
+});
+
 describe("resolveConflict guarda uma cópia da versão descartada", () => {
   async function inConflict() {
     const ctx = await setup({ debounceMs: 60_000 });

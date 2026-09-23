@@ -58,6 +58,10 @@ export type AppLoadError = LoadError | "missing-with-backups";
 
 const MISSING_WITH_BACKUPS_MESSAGE =
   "O kamban.json não está nesta pasta, mas existem backups. Se a pasta está no iCloud, o arquivo pode ainda não ter sido baixado: abra a pasta no Finder, espere o download e tente de novo, ou restaure o último backup.";
+const ICLOUD_PENDING_MESSAGE =
+  "O kamban.json desta pasta está no iCloud e ainda não foi baixado. Abra a pasta no Finder, espere o download terminar e toque em Tentar de novo.";
+/** Marcador que o iCloud deixa no lugar de um arquivo ainda não baixado. */
+const ICLOUD_PLACEHOLDER = `.${DATA_FILE}.icloud`;
 
 export interface AppState {
   phase: Phase;
@@ -226,9 +230,14 @@ export function createAppStore(deps: AppDeps): AppStore {
       return mutate((d) => updateCard(d, cardId, { checklist: fn(getCard(d, cardId).checklist) }, clock.now()));
     }
 
-    /** A pasta já teve dados (backups ou o marcador de download pendente do iCloud)? */
-    async function hasTraceOfData(dir: string): Promise<boolean> {
-      return (await listBackups(fs, dir)).length > 0 || (await fs.exists(joinPath(dir, `.${DATA_FILE}.icloud`)));
+    /**
+     * Sem kamban.json, a pasta já teve dados? Devolve a mensagem para a tela de erro, ou null se a pasta é nova.
+     * O marcador do iCloud é procurado listando a pasta: o escopo do Tauri proíbe acessar direto caminhos com ".".
+     */
+    async function missingDataMessage(dir: string): Promise<string | null> {
+      if ((await listBackups(fs, dir)).length > 0) return MISSING_WITH_BACKUPS_MESSAGE;
+      if ((await fs.list(dir)).includes(ICLOUD_PLACEHOLDER)) return ICLOUD_PENDING_MESSAGE;
+      return null;
     }
 
     /**
@@ -332,12 +341,13 @@ export function createAppStore(deps: AppDeps): AppStore {
               set({ phase: "choose-folder", notice: `Pasta não encontrada: ${dir}` });
               return;
             case "missing": {
-              if (await hasTraceOfData(dir)) {
+              const missingMessage = await missingDataMessage(dir);
+              if (missingMessage) {
                 await rememberDir(dir);
                 set({
                   phase: "load-error",
                   dataDir: dir,
-                  loadError: { error: "missing-with-backups", message: MISSING_WITH_BACKUPS_MESSAGE },
+                  loadError: { error: "missing-with-backups", message: missingMessage },
                 });
                 return;
               }
