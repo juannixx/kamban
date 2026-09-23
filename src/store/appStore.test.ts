@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { getBoard } from "../domain/boards";
 import { getCard } from "../domain/cards";
 import { isHabitDone } from "../domain/habits";
+import { listBackups } from "../persistence/backups";
 import { MemoryFs } from "../persistence/memoryFs";
 import { parseData } from "../persistence/load";
 import { saveData, serialize } from "../persistence/save";
@@ -357,5 +358,136 @@ describe("proteções contra perda de dados", () => {
     expect(state().notice).toBe(
       "Não foi possível salvar as alterações na pasta atual. A troca de pasta foi cancelada.",
     );
+  });
+});
+
+describe("falhas inesperadas de I/O ao abrir", () => {
+  it("openFolder com exists() lançando erro volta para a escolha de pasta com aviso", async () => {
+    const { fs, state } = await setup();
+    fs.exists = async () => {
+      throw new Error("forbidden path");
+    };
+    await state().openFolder("/Volumes/X");
+    expect(state().phase).toBe("choose-folder");
+    expect(state().notice).toBe("Não foi possível abrir a pasta /Volumes/X: Error: forbidden path");
+    expect(state().hasPendingChanges()).toBe(false);
+  });
+
+  it("boot com a leitura da pasta salva falhando volta para a escolha de pasta com aviso", async () => {
+    const fs = new MemoryFs();
+    const settings = {
+      getDataDir: async (): Promise<string | null> => {
+        throw new Error("store corrompido");
+      },
+      setDataDir: async () => {},
+    };
+    const store = createAppStore({ fs, settings, clock: fakeClock(), debounceMs: 1 });
+    await store.getState().boot();
+    expect(store.getState().phase).toBe("choose-folder");
+    expect(store.getState().notice).toContain("store corrompido");
+  });
+});
+
+describe("kamban.json ausente numa pasta que já tem dados", () => {
+  it("com backups não cria um quadro vazio: vai para load-error e o backup pode ser restaurado", async () => {
+    const { fs, state } = await setup();
+    const good = await (async () => {
+      const temp = await setup();
+      await temp.state().openFolder(DIR);
+      temp.state().renameBoard("id-1", "Meus dados");
+      return temp.state().data;
+    })();
+    await fs.mkdir("/data/backups");
+    await fs.writeText("/data/backups/kamban-2026-09-22.json", serialize(good));
+
+    await state().openFolder(DIR);
+    expect(state().phase).toBe("load-error");
+    expect(state().dataDir).toBe(DIR);
+    expect(state().loadError?.error).toBe("missing-with-backups");
+    expect(state().loadError?.message).toBe(
+      "O kamban.json não está nesta pasta, mas existem backups. Se a pasta está no iCloud, o arquivo pode ainda não ter sido baixado: abra a pasta no Finder, espere o download e tente de novo, ou restaure o último backup.",
+    );
+    expect(await fs.exists("/data/kamban.json")).toBe(false);
+
+    await state().restoreBackup();
+    expect(state().phase).toBe("ready");
+    expect(getBoard(state().data, "id-1").name).toBe("Meus dados");
+    expect(getBoard(await readFile(fs), "id-1").name).toBe("Meus dados");
+  });
+
+  it("com o marcador do iCloud (.kamban.json.icloud) não cria um quadro vazio", async () => {
+    const { fs, state } = await setup();
+    await fs.writeText("/data/.kamban.json.icloud", "");
+    await state().openFolder(DIR);
+    expect(state().phase).toBe("load-error");
+    expect(state().loadError?.error).toBe("missing-with-backups");
+    expect(await fs.exists("/data/kamban.json")).toBe(false);
+  });
+});
+
+describe("resolveConflict guarda uma cópia da versão descartada", () => {
+  async function inConflict() {
+    const ctx = await setup({ debounceMs: 60_000 });
+    await ctx.state().openFolder(DIR);
+    ctx.state().renameBoard("id-1", "Do app");
+    await externalEdit(ctx.fs, "Do disco");
+    await ctx.state().onFocus();
+    expect(ctx.state().conflict).toBe(true);
+    return ctx;
+  }
+  const COPY = "/data/backups/kamban-conflito-2026-09-23T12-00-00Z.json";
+
+  async function readCopy(fs: MemoryFs) {
+    const result = parseData(await fs.readText(COPY));
+    if (!result.ok) throw new Error(result.message);
+    return result.data;
+  }
+
+  it("'app': a versão do disco vai para backups/ antes de ser sobrescrita", async () => {
+    const { fs, state } = await inConflict();
+    await state().resolveConflict("app");
+    expect(getBoard(await readFile(fs), "id-1").name).toBe("Do app");
+    expect(getBoard(await readCopy(fs), "id-1").name).toBe("Do disco");
+  });
+
+  it("'disk': a versão do app vai para backups/ antes de ser descartada", async () => {
+    const { fs, state } = await inConflict();
+    await state().resolveConflict("disk");
+    expect(getBoard(state().data, "id-1").name).toBe("Do disco");
+    expect(getBoard(await readCopy(fs), "id-1").name).toBe("Do app");
+  });
+
+  it("o nome da cópia não entra na rotação dos backups diários", async () => {
+    const { fs, state } = await inConflict();
+    await state().resolveConflict("disk");
+    expect(await listBackups(fs, DIR)).not.toContain("kamban-conflito-2026-09-23T12-00-00Z.json");
+  });
+
+  it("se não conseguir guardar a cópia, avisa e o conflito continua", async () => {
+    const { fs, state } = await inConflict();
+    fs.failWrites = true;
+    await state().resolveConflict("disk");
+    expect(state().conflict).toBe(true);
+    expect(getBoard(state().data, "id-1").name).toBe("Do app");
+    expect(state().notice).toContain("Não foi possível guardar uma cópia da outra versão");
+
+    await state().resolveConflict("app");
+    expect(state().conflict).toBe(true);
+    fs.failWrites = false;
+    expect(getBoard(await readFile(fs), "id-1").name).toBe("Do disco");
+  });
+});
+
+describe("recarregar do disco", () => {
+  it("fecha o cartão aberto para o painel não ficar com um rascunho antigo", async () => {
+    const { fs, state } = await setup();
+    await state().openFolder(DIR);
+    const cardId = state().addCard("id-1", "id-2", "Cartão")!;
+    await state().flush();
+    state().openCard(cardId);
+    await externalEdit(fs, "Do outro Mac");
+    await state().onFocus();
+    expect(getBoard(state().data, "id-1").name).toBe("Do outro Mac");
+    expect(state().selectedCardId).toBeNull();
   });
 });

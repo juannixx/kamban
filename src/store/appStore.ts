@@ -21,10 +21,11 @@ import { addColumn, removeColumn, renameColumn, reorderColumns, setDoneColumn } 
 import { DomainError } from "../domain/errors";
 import { addHabit, archiveHabit, reorderHabits, toggleHabit, updateHabit } from "../domain/habits";
 import type { ChecklistItem, HabitSchedule, KambanData } from "../domain/schema";
-import { DATA_FILE, joinPath, type FileSystem } from "../persistence/fs";
+import { listBackups } from "../persistence/backups";
+import { BACKUP_DIR, DATA_FILE, joinPath, type FileSystem } from "../persistence/fs";
 import { loadData, type LoadError } from "../persistence/load";
 import { restoreLatestBackup } from "../persistence/restore";
-import { saveData } from "../persistence/save";
+import { saveData, serialize } from "../persistence/save";
 import { createSaveScheduler, type SaveScheduler, type SaveStatus } from "../persistence/saveScheduler";
 
 export interface Settings {
@@ -52,12 +53,17 @@ export interface AppDeps {
 
 export type View = { type: "today" } | { type: "habits" } | { type: "settings" } | { type: "board"; boardId: string };
 export type Phase = "booting" | "choose-folder" | "load-error" | "ready";
+/** Erros de leitura da persistência mais os que só o store identifica. */
+export type AppLoadError = LoadError | "missing-with-backups";
+
+const MISSING_WITH_BACKUPS_MESSAGE =
+  "O kamban.json não está nesta pasta, mas existem backups. Se a pasta está no iCloud, o arquivo pode ainda não ter sido baixado: abra a pasta no Finder, espere o download e tente de novo, ou restaure o último backup.";
 
 export interface AppState {
   phase: Phase;
   dataDir: string | null;
   data: KambanData;
-  loadError: { error: LoadError; message: string } | null;
+  loadError: { error: AppLoadError; message: string } | null;
   saveStatus: SaveStatus;
   /** Verdadeiro desde a última gravação que falhou até a próxima que der certo. */
   lastSaveFailed: boolean;
@@ -220,11 +226,42 @@ export function createAppStore(deps: AppDeps): AppStore {
       return mutate((d) => updateCard(d, cardId, { checklist: fn(getCard(d, cardId).checklist) }, clock.now()));
     }
 
+    /** A pasta já teve dados (backups ou o marcador de download pendente do iCloud)? */
+    async function hasTraceOfData(dir: string): Promise<boolean> {
+      return (await listBackups(fs, dir)).length > 0 || (await fs.exists(joinPath(dir, `.${DATA_FILE}.icloud`)));
+    }
+
+    /**
+     * Guarda em backups/ a versão que o usuário vai descartar ao resolver um conflito.
+     * O nome não bate com o padrão dos backups diários, então a rotação nunca o apaga.
+     */
+    async function saveConflictCopy(dir: string, keep: "app" | "disk"): Promise<boolean> {
+      try {
+        let content: string;
+        if (keep === "disk") {
+          content = serialize(get().data);
+        } else {
+          const path = joinPath(dir, DATA_FILE);
+          if (!(await fs.exists(path))) return true; // nada no disco a perder
+          content = await fs.readText(path);
+        }
+        const backupDir = joinPath(dir, BACKUP_DIR);
+        await fs.mkdir(backupDir);
+        await fs.writeText(joinPath(backupDir, `kamban-conflito-${clock.stamp()}.json`), content);
+        return true;
+      } catch (error) {
+        set({
+          notice: `Não foi possível guardar uma cópia da outra versão em backups/: ${String(error)}. O conflito continua aberto.`,
+        });
+        return false;
+      }
+    }
+
     async function reloadFromDisk(dir: string) {
       const outcome = await loadData(fs, dir);
       if (outcome.status === "ok") {
         lastMtime = outcome.mtime;
-        set({ data: outcome.data, conflict: false });
+        set({ data: outcome.data, conflict: false, selectedCardId: null });
       } else if (outcome.status === "error") {
         stopScheduler();
         set({ phase: "load-error", loadError: { error: outcome.error, message: outcome.message }, conflict: false });
@@ -263,12 +300,18 @@ export function createAppStore(deps: AppDeps): AppStore {
       selectedCardId: null,
 
       async boot() {
-        const dir = await settings.getDataDir();
-        if (!dir) {
-          set({ phase: "choose-folder" });
-          return;
+        let dir: string | null = null;
+        try {
+          dir = await settings.getDataDir();
+          if (!dir) {
+            set({ phase: "choose-folder" });
+            return;
+          }
+          await get().openFolder(dir);
+        } catch (error) {
+          stopScheduler();
+          set({ phase: "choose-folder", notice: `Não foi possível abrir a pasta ${dir ?? "salva"}: ${String(error)}` });
         }
-        await get().openFolder(dir);
       },
 
       async openFolder(dir) {
@@ -282,30 +325,44 @@ export function createAppStore(deps: AppDeps): AppStore {
           return;
         }
         stopScheduler();
-        const outcome = await loadData(fs, dir);
-        switch (outcome.status) {
-          case "no-folder":
-            set({ phase: "choose-folder", notice: `Pasta não encontrada: ${dir}` });
-            return;
-          case "missing": {
-            const data = createInitialData(newBoardIds());
-            try {
-              const mtime = await saveData(fs, dir, data, clock.today());
-              await rememberDir(dir);
-              becomeReady(dir, data, mtime);
-            } catch (error) {
-              set({ phase: "choose-folder", notice: `Não foi possível criar o arquivo em ${dir}: ${String(error)}` });
+        try {
+          const outcome = await loadData(fs, dir);
+          switch (outcome.status) {
+            case "no-folder":
+              set({ phase: "choose-folder", notice: `Pasta não encontrada: ${dir}` });
+              return;
+            case "missing": {
+              if (await hasTraceOfData(dir)) {
+                await rememberDir(dir);
+                set({
+                  phase: "load-error",
+                  dataDir: dir,
+                  loadError: { error: "missing-with-backups", message: MISSING_WITH_BACKUPS_MESSAGE },
+                });
+                return;
+              }
+              const data = createInitialData(newBoardIds());
+              try {
+                const mtime = await saveData(fs, dir, data, clock.today());
+                await rememberDir(dir);
+                becomeReady(dir, data, mtime);
+              } catch (error) {
+                set({ phase: "choose-folder", notice: `Não foi possível criar o arquivo em ${dir}: ${String(error)}` });
+              }
+              return;
             }
-            return;
+            case "ok":
+              await rememberDir(dir);
+              becomeReady(dir, outcome.data, outcome.mtime);
+              return;
+            case "error":
+              await rememberDir(dir);
+              set({ phase: "load-error", dataDir: dir, loadError: { error: outcome.error, message: outcome.message } });
+              return;
           }
-          case "ok":
-            await rememberDir(dir);
-            becomeReady(dir, outcome.data, outcome.mtime);
-            return;
-          case "error":
-            await rememberDir(dir);
-            set({ phase: "load-error", dataDir: dir, loadError: { error: outcome.error, message: outcome.message } });
-            return;
+        } catch (error) {
+          stopScheduler();
+          set({ phase: "choose-folder", notice: `Não foi possível abrir a pasta ${dir}: ${String(error)}` });
         }
       },
 
@@ -347,6 +404,7 @@ export function createAppStore(deps: AppDeps): AppStore {
       async resolveConflict(keep) {
         const dir = get().dataDir;
         if (!dir) return;
+        if (!(await saveConflictCopy(dir, keep))) return;
         set({ conflict: false });
         startScheduler(dir);
         if (keep === "app") {
