@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { addCard, getCard } from "../../domain/cards";
 import type { KambanData } from "../../domain/schema";
 import { NOW } from "../../domain/testing";
+import { commitFocusedDraft } from "../../platform/windowLifecycle";
 import { setupApp } from "../testing";
 import { CardPanel } from "./CardPanel";
 
@@ -54,6 +55,39 @@ describe("CardPanel", () => {
     expect(screen.getByText("documentos").tagName).toBe("STRONG");
     await user.click(screen.getByRole("button", { name: "Editar" }));
     expect(screen.getByRole("textbox", { name: "Descrição" })).toBeTruthy();
+  });
+
+  it("HTML cru na descrição aparece como texto, sem criar elementos", async () => {
+    const { user, container } = await setupApp(<CardPanel cardId="k1" />, { seed });
+    fireEvent.change(screen.getByRole("textbox", { name: "Descrição" }), {
+      target: { value: '<b>cru</b> <img src="x" onerror="alert(1)">' },
+    });
+    await user.click(screen.getByRole("button", { name: "Visualizar" }));
+    expect(container.querySelector("b")).toBeNull();
+    expect(container.querySelector("img")).toBeNull();
+    expect(screen.getByText(/<b>cru<\/b>/)).toBeTruthy();
+  });
+
+  it("clicar num link da descrição abre no navegador pelo platform.openUrl", async () => {
+    const { user, platform } = await setupApp(<CardPanel cardId="k1" />, { seed });
+    fireEvent.change(screen.getByRole("textbox", { name: "Descrição" }), {
+      target: { value: "Veja [o site](https://exemplo.com/pagina)" },
+    });
+    await user.click(screen.getByRole("button", { name: "Visualizar" }));
+    await user.click(screen.getByRole("link", { name: "o site" }));
+    expect(platform.openUrl).toHaveBeenCalledWith("https://exemplo.com/pagina");
+  });
+
+  it("texto digitado e ainda sem sair do campo é gravado quando os rascunhos são confirmados", async () => {
+    const { store, user } = await setupApp(<CardPanel cardId="k1" />, { seed });
+    await user.type(screen.getByRole("textbox", { name: "Descrição" }), "Rascunho");
+    const title = screen.getByRole("textbox", { name: "Título" });
+    await user.clear(title);
+    await user.type(title, "Viagem longa");
+    expect(card(store).title).toBe("Viagem");
+    act(() => commitFocusedDraft());
+    expect(card(store).title).toBe("Viagem longa");
+    expect(card(store).description).toBe("Rascunho");
   });
 
   it("checklist: adiciona, marca, reordena e remove", async () => {
