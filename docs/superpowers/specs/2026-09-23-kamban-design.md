@@ -21,7 +21,7 @@ Busca, atalhos avançados de teclado, seletor manual de tema (a v1 segue o tema 
 
 ## 2. Stack
 
-Tauri 2, React 18, TypeScript, Vite, Zustand, Zod, dnd-kit, Tailwind CSS, Vitest, React Testing Library, ESLint, pnpm.
+Tauri 2, React 19, TypeScript 6.0 (o typescript-eslint ainda não suporta a 7), Vite, Zustand, Zod, dnd-kit, Tailwind CSS, Vitest, React Testing Library, ESLint, pnpm.
 
 ## 3. Modelo de dados
 
@@ -203,10 +203,10 @@ src-tauri/      shell Tauri (Rust mínimo, plugins fs e dialog)
 
 ## 8. CI e entrega (GitHub Actions)
 
-- **`.github/workflows/ci.yml`**: em todo pull request e push. Ubuntu, pnpm install, typecheck, lint, testes e build do frontend.
+- **`.github/workflows/ci.yml`**: em todo pull request e em push na `main`. Ubuntu, pnpm install, typecheck, lint, testes e build do frontend.
 - **`.github/workflows/release.yml`**: em push de tag `v*`. Runner macOS, build Tauri universal (Intel e Apple Silicon), publica o `.dmg` num GitHub Release. O app não é assinado; na primeira abertura, "clique direito > Abrir".
 
 ## 9. Fluxo de trabalho
 
-- Nada é commitado direto na `main`. Cada etapa do plano vira branch e PR, com CI verde e revisão humana antes do merge.
+- A implementação é dividida em duas fases, cada uma com seu plano e seu PR: Fase 1 (núcleo: scaffold, CI, domain e persistence) e Fase 2 (shell Tauri, store, telas e release). Nada é commitado direto na `main`; cada fase vira branch e PR, com CI verde e revisão humana antes do merge.
 - Proteção da `main` exigindo o CI verde será proposta quando o `ci.yml` existir, e só aplicada com confirmação.
