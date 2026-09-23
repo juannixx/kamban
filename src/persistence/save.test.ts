@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { createInitialData, renameBoard } from "../domain/boards";
+import { addCard, updateCard } from "../domain/cards";
 import { backupName, listBackups, rotateBackups } from "./backups";
 import { MemoryFs } from "./memoryFs";
 import { saveData, serialize } from "./save";
@@ -42,6 +43,37 @@ describe("saveData", () => {
 
     await saveData(fs, DIR, initial(), "2026-09-24");
     expect(await listBackups(fs, DIR)).toEqual(["kamban-2026-09-24.json", "kamban-2026-09-23.json"]);
+  });
+
+  it("recusa gravar dados que não passam no schema e não altera o arquivo existente", async () => {
+    await saveData(fs, DIR, initial(), "2026-09-23");
+
+    const withCard = addCard(initial(), {
+      id: "card1",
+      boardId: "b1",
+      columnId: "c1",
+      title: "Tarefa",
+      now: "2026-09-23T00:00:00.000Z",
+    });
+    const invalid = updateCard(withCard, "card1", { dueDate: "" }, "2026-09-23T00:00:00.000Z");
+
+    await expect(saveData(fs, DIR, invalid, "2026-09-23")).rejects.toThrow();
+    expect(await fs.readText("/data/kamban.json")).toBe(serialize(initial()));
+    expect(await fs.exists("/data/kamban.json.tmp")).toBe(false);
+  });
+
+  it("recusa gravar dados inválidos quando ainda não existe arquivo (não cria nada)", async () => {
+    const withCard = addCard(initial(), {
+      id: "card1",
+      boardId: "b1",
+      columnId: "c1",
+      title: "Tarefa",
+      now: "2026-09-23T00:00:00.000Z",
+    });
+    const invalid = updateCard(withCard, "card1", { dueDate: "" }, "2026-09-23T00:00:00.000Z");
+
+    await expect(saveData(fs, DIR, invalid, "2026-09-23")).rejects.toThrow();
+    expect(await fs.exists("/data/kamban.json")).toBe(false);
   });
 });
 

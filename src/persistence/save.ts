@@ -1,4 +1,4 @@
-import type { KambanData } from "../domain/schema";
+import { kambanDataSchema, type KambanData } from "../domain/schema";
 import { backupIfNeeded } from "./backups";
 import { DATA_FILE, joinPath, TMP_FILE, type FileSystem } from "./fs";
 
@@ -16,6 +16,7 @@ export async function writeAtomic(fs: FileSystem, dir: string, content: string):
 }
 
 export async function saveData(fs: FileSystem, dir: string, data: KambanData, today: string): Promise<number> {
+  const parsed = kambanDataSchema.parse(data);
   await backupIfNeeded(fs, dir, today);
-  return writeAtomic(fs, dir, serialize(data));
+  return writeAtomic(fs, dir, serialize(parsed));
 }
