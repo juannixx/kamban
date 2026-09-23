@@ -90,4 +90,54 @@ describe("createSaveScheduler", () => {
     await vi.advanceTimersByTimeAsync(1000);
     expect(saveFn).not.toHaveBeenCalled();
   });
+
+  it("save que lança erro de forma síncrona não perde a pendência e flush nunca rejeita", async () => {
+    let fail = true;
+    const syncSave = (): Promise<void> => {
+      if (fail) throw new Error("EIO síncrono");
+      return Promise.resolve();
+    };
+    const { scheduler, saveFn, statuses } = setup(syncSave);
+    scheduler.schedule();
+
+    await expect(scheduler.flush()).resolves.toBeUndefined();
+    expect(statuses.at(-1)).toBe("error");
+    expect(scheduler.hasPendingChanges()).toBe(true);
+
+    fail = false;
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(saveFn).toHaveBeenCalledTimes(2);
+    expect(statuses.at(-1)).toBe("saved");
+    expect(scheduler.hasPendingChanges()).toBe(false);
+  });
+
+  it("onStatus que lança erro não impede o flush nem a gravação", async () => {
+    const saveFn = vi.fn(async () => {});
+    const onStatus = vi.fn(() => {
+      throw new Error("boom no onStatus");
+    });
+    const scheduler = createSaveScheduler({ save: saveFn, onStatus });
+
+    scheduler.schedule();
+    await expect(scheduler.flush()).resolves.toBeUndefined();
+    expect(saveFn).toHaveBeenCalledTimes(1);
+  });
+
+  it("dispose durante gravação em andamento que falha não rearma a retentativa", async () => {
+    let reject: (error: Error) => void = () => {};
+    const { scheduler, saveFn } = setup(
+      () =>
+        new Promise<void>((_resolve, rej) => {
+          reject = rej;
+        }),
+    );
+    scheduler.schedule();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(saveFn).toHaveBeenCalledTimes(1);
+
+    scheduler.dispose();
+    reject(new Error("EIO"));
+    await vi.advanceTimersByTimeAsync(10000);
+    expect(saveFn).toHaveBeenCalledTimes(1);
+  });
 });

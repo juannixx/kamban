@@ -25,6 +25,7 @@ export function createSaveScheduler({
   let timer: ReturnType<typeof setTimeout> | undefined;
   let dirty = false;
   let running: Promise<void> | null = null;
+  let disposed = false;
 
   function clearTimer() {
     if (timer !== undefined) clearTimeout(timer);
@@ -32,27 +33,39 @@ export function createSaveScheduler({
   }
 
   function startTimer(ms: number) {
+    if (disposed) return;
     clearTimer();
     timer = setTimeout(() => {
       void run();
     }, ms);
   }
 
+  /** Isola exceções de onStatus: um onStatus que lança nunca derruba o agendador. */
+  function emit(status: SaveStatus) {
+    try {
+      onStatus(status);
+    } catch {
+      // ignorado de propósito: falha do observador não é falha da gravação.
+    }
+  }
+
   async function run(): Promise<void> {
+    if (disposed) return;
     clearTimer();
     while (running) await running;
-    if (!dirty) return;
+    if (disposed || !dirty) return;
 
     dirty = false;
-    onStatus("saving");
-    const current: Promise<void> = save()
+    emit("saving");
+    const current: Promise<void> = Promise.resolve()
+      .then(save)
       .then(
         () => {
-          onStatus(dirty ? "pending" : "saved");
+          emit(dirty ? "pending" : "saved");
         },
         () => {
           dirty = true;
-          onStatus("error");
+          emit("error");
           startTimer(retryMs);
         },
       )
@@ -65,12 +78,16 @@ export function createSaveScheduler({
 
   return {
     schedule() {
+      if (disposed) return;
       dirty = true;
-      onStatus("pending");
+      emit("pending");
       startTimer(debounceMs);
     },
     flush: run,
     hasPendingChanges: () => dirty || running !== null,
-    dispose: clearTimer,
+    dispose() {
+      disposed = true;
+      clearTimer();
+    },
   };
 }
