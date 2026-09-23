@@ -1,6 +1,6 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { StrictMode } from "react";
-import { createRoot } from "react-dom/client";
+import { createRoot, type Root } from "react-dom/client";
 import "./index.css";
 import { systemClock } from "./platform/clock";
 import { createTauriSettings } from "./platform/settings";
@@ -10,13 +10,19 @@ import { attachWindowLifecycle } from "./platform/windowLifecycle";
 import { createAppStore } from "./store/appStore";
 import { App } from "./ui/App";
 import { AppProvider } from "./ui/context";
+import { renderFatalError } from "./ui/fatalError";
+
+const maybeRoot = document.getElementById("root");
+if (!maybeRoot) throw new Error("Elemento #root não encontrado");
+/** Tipado sem `| null`: closures abaixo não recuperam o estreitamento de `maybeRoot`. */
+const rootElement: HTMLElement = maybeRoot;
+
+let reactRoot: Root | null = null;
 
 async function start() {
-  const root = document.getElementById("root");
-  if (!root) throw new Error("Elemento #root não encontrado");
-
   const store = createAppStore({ fs: tauriFs, settings: await createTauriSettings(), clock: systemClock });
-  createRoot(root).render(
+  reactRoot = createRoot(rootElement);
+  reactRoot.render(
     <StrictMode>
       <AppProvider store={store} platform={tauriPlatform}>
         <App />
@@ -27,4 +33,8 @@ async function start() {
   await store.getState().boot();
 }
 
-void start();
+start().catch((error: unknown) => {
+  reactRoot?.unmount();
+  renderFatalError(rootElement, error);
+  console.error(error);
+});
