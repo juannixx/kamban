@@ -60,6 +60,9 @@ export function addCard(data: KambanData, input: NewCardInput): KambanData {
 }
 
 export function updateCard(data: KambanData, cardId: string, patch: CardPatch, now: string): KambanData {
+  if ("checklist" in patch && patch.checklist === undefined) {
+    throw new DomainError("O checklist não pode ser removido.");
+  }
   const title = "title" in patch ? requireText(patch.title ?? "", "Título") : undefined;
   return mapCard(data, cardId, (c) => ({
     ...c,

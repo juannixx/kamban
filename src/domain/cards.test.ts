@@ -68,6 +68,10 @@ describe("updateCard", () => {
   it("rejeita título vazio", () => {
     expect(() => updateCard(withCards("A"), "k1", { title: "" }, NOW)).toThrow(DomainError);
   });
+
+  it("rejeita checklist undefined", () => {
+    expect(() => updateCard(withCards("A"), "k1", { checklist: undefined }, NOW)).toThrow(DomainError);
+  });
 });
 
 describe("moveCard", () => {
