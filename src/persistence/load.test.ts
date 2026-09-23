@@ -42,6 +42,13 @@ describe("migrate", () => {
     expect(migrate("x")).toBe("x");
     expect(migrate({ a: 1 })).toEqual({ a: 1 });
   });
+
+  it("interrompe se uma migração não avançar a versão, para não entrar em loop infinito", () => {
+    const migrations = {
+      1: (raw: Record<string, unknown>) => ({ ...raw, version: 1 }),
+    };
+    expect(migrate({ version: 1 }, migrations, 3)).toEqual({ version: 1 });
+  }, 1000);
 });
 
 describe("loadData", () => {

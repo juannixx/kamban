@@ -31,7 +31,9 @@ export function migrate(
   while (typeof value.version === "number" && value.version < current) {
     const step = migrations[value.version];
     if (!step) break;
+    const previousVersion = value.version;
     value = step(value);
+    if (typeof value.version !== "number" || value.version <= previousVersion) break; // sem progresso: evita loop infinito
   }
   return value;
 }
