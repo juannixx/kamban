@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Kamban",
-  "version": "0.1.0",
+  "version": "../package.json",
   "identifier": "com.juannixx.kamban",
   "build": {
     "beforeDevCommand": "pnpm dev",
@@ -13,7 +13,9 @@
     "windows": [
       { "title": "Kamban", "width": 1280, "height": 800, "minWidth": 900, "minHeight": 600 }
     ],
-    "security": { "csp": null }
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; connect-src ipc: http://ipc.localhost"
+    }
   },
   "bundle": {
     "active": true,

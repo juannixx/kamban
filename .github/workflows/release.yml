@@ -29,7 +29,7 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "Kamban ${{ github.ref_name }}"
-          releaseBody: "Baixe o arquivo .dmg abaixo. Na primeira abertura, clique com o botão direito no app e escolha Abrir (o app não tem assinatura da Apple)."
+          releaseBody: "Baixe o arquivo .dmg abaixo e arraste o Kamban para Aplicativos. O app não tem assinatura da Apple: na primeira abertura, se o macOS bloquear, vá em Ajustes do Sistema > Privacidade e Segurança e clique em Abrir Mesmo Assim."
           releaseDraft: false
           prerelease: false
           args: --target universal-apple-darwin
