@@ -135,6 +135,10 @@ export function createAppStore(deps: AppDeps): AppStore {
         debounceMs: deps.debounceMs,
         retryMs: deps.retryMs,
         save: async () => {
+          if (await diskChanged(dir)) {
+            enterConflict();
+            throw new Error("O arquivo mudou fora do app.");
+          }
           lastMtime = await saveData(fs, dir, get().data, clock.today());
         },
         onStatus: (status) =>
@@ -143,6 +147,30 @@ export function createAppStore(deps: AppDeps): AppStore {
             lastSaveFailed: status === "error" ? true : status === "saved" ? false : s.lastSaveFailed,
           })),
       });
+    }
+
+    /** Interrompe a gravação automática e sinaliza que o arquivo mudou fora do app. */
+    function enterConflict() {
+      stopScheduler();
+      set({ conflict: true });
+    }
+
+    /** O arquivo em disco mudou desde a última leitura/gravação feita pelo app? Erros de I/O não contam como mudança. */
+    async function diskChanged(dir: string): Promise<boolean> {
+      try {
+        return (await fs.mtime(joinPath(dir, DATA_FILE))) !== lastMtime;
+      } catch {
+        return false;
+      }
+    }
+
+    /** Registra a pasta escolhida; uma falha aqui não deve travar a abertura da pasta. */
+    async function rememberDir(dir: string): Promise<void> {
+      try {
+        await settings.setDataDir(dir);
+      } catch (error) {
+        set({ notice: `Não foi possível lembrar a pasta escolhida: ${String(error)}` });
+      }
     }
 
     function becomeReady(dir: string, data: KambanData, mtime: number) {
@@ -169,6 +197,10 @@ export function createAppStore(deps: AppDeps): AppStore {
     /** Aplica uma função do domínio; DomainError vira aviso. */
     function mutate(fn: (data: KambanData) => KambanData): boolean {
       if (get().phase !== "ready") return false;
+      if (get().conflict) {
+        set({ notice: "Resolva o conflito do arquivo antes de continuar editando." });
+        return false;
+      }
       let next: KambanData;
       try {
         next = fn(get().data);
@@ -210,7 +242,7 @@ export function createAppStore(deps: AppDeps): AppStore {
       }
       if (mtime === lastMtime) return;
       if (scheduler?.hasPendingChanges()) {
-        set({ conflict: true });
+        enterConflict();
         return;
       }
       await reloadFromDisk(dir);
@@ -239,9 +271,16 @@ export function createAppStore(deps: AppDeps): AppStore {
       },
 
       async openFolder(dir) {
-        await scheduler?.flush();
-        stopScheduler();
         set({ phase: "booting" });
+        await scheduler?.flush();
+        if (scheduler?.hasPendingChanges() && get().dataDir) {
+          set({
+            phase: "ready",
+            notice: "Não foi possível salvar as alterações na pasta atual. A troca de pasta foi cancelada.",
+          });
+          return;
+        }
+        stopScheduler();
         const outcome = await loadData(fs, dir);
         switch (outcome.status) {
           case "no-folder":
@@ -251,7 +290,7 @@ export function createAppStore(deps: AppDeps): AppStore {
             const data = createInitialData(newBoardIds());
             try {
               const mtime = await saveData(fs, dir, data, clock.today());
-              await settings.setDataDir(dir);
+              await rememberDir(dir);
               becomeReady(dir, data, mtime);
             } catch (error) {
               set({ phase: "choose-folder", notice: `Não foi possível criar o arquivo em ${dir}: ${String(error)}` });
@@ -259,17 +298,18 @@ export function createAppStore(deps: AppDeps): AppStore {
             return;
           }
           case "ok":
-            await settings.setDataDir(dir);
+            await rememberDir(dir);
             becomeReady(dir, outcome.data, outcome.mtime);
             return;
           case "error":
-            await settings.setDataDir(dir);
+            await rememberDir(dir);
             set({ phase: "load-error", dataDir: dir, loadError: { error: outcome.error, message: outcome.message } });
             return;
         }
       },
 
       async restoreBackup() {
+        if (get().phase !== "load-error") return;
         const dir = get().dataDir;
         if (!dir) return;
         try {
@@ -294,8 +334,8 @@ export function createAppStore(deps: AppDeps): AppStore {
       async onFocus() {
         get().refreshToday();
         if (get().phase !== "ready") return;
-        if (get().lastSaveFailed) await scheduler?.flush();
         await checkExternalChange();
+        if (get().lastSaveFailed && !get().conflict) await scheduler?.flush();
       },
 
       refreshToday() {
@@ -307,13 +347,19 @@ export function createAppStore(deps: AppDeps): AppStore {
         const dir = get().dataDir;
         if (!dir) return;
         set({ conflict: false });
+        startScheduler(dir);
         if (keep === "app") {
+          try {
+            lastMtime = await fs.mtime(joinPath(dir, DATA_FILE));
+          } catch {
+            // ignorado de propósito: sem mtime atual, a próxima gravação ainda tenta.
+          }
           scheduler?.schedule();
           await scheduler?.flush();
           return;
         }
-        startScheduler(dir);
         await reloadFromDisk(dir);
+        if (get().phase === "ready") set({ saveStatus: "saved", lastSaveFailed: false });
       },
 
       showNotice: (message) => set({ notice: message }),

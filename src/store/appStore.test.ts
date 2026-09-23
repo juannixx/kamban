@@ -26,6 +26,12 @@ async function readFile(fs: MemoryFs) {
   return result.data;
 }
 
+async function externalEdit(fs: MemoryFs, name: string) {
+  const current = await readFile(fs);
+  const edited = { ...current, boards: current.boards.map((b) => ({ ...b, name })) };
+  await saveData(fs, DIR, edited, "2026-09-23");
+}
+
 describe("boot e abertura de pasta", () => {
   it("sem pasta salva vai para a escolha de pasta", async () => {
     const { state } = await setup();
@@ -166,12 +172,6 @@ describe("alterações e gravação", () => {
 });
 
 describe("alteração externa do arquivo", () => {
-  async function externalEdit(fs: MemoryFs, name: string) {
-    const current = await readFile(fs);
-    const edited = { ...current, boards: current.boards.map((b) => ({ ...b, name })) };
-    await saveData(fs, DIR, edited, "2026-09-23");
-  }
-
   it("sem edições pendentes recarrega do disco ao ganhar foco", async () => {
     const { fs, state } = await setup();
     await state().openFolder(DIR);
@@ -213,5 +213,108 @@ describe("alteração externa do arquivo", () => {
     await state().onFocus();
     expect(state().conflict).toBe(false);
     expect(getBoard(state().data, "id-1").name).toBe("Meu");
+  });
+});
+
+describe("proteções contra perda de dados", () => {
+  it("conflito congela a gravação", async () => {
+    const { fs, state } = await setup({ debounceMs: 1 });
+    await state().openFolder(DIR);
+    state().renameBoard("id-1", "Do app");
+    await externalEdit(fs, "Do disco");
+    await state().onFocus();
+    expect(state().conflict).toBe(true);
+
+    await new Promise((r) => setTimeout(r, 30));
+    expect(getBoard(await readFile(fs), "id-1").name).toBe("Do disco");
+
+    expect(state().renameBoard("id-1", "Outro")).toBe(false);
+    expect(state().notice).toBe("Resolva o conflito do arquivo antes de continuar editando.");
+
+    await state().resolveConflict("disk");
+    expect(getBoard(state().data, "id-1").name).toBe("Do disco");
+    expect(state().saveStatus).toBe("saved");
+    expect(state().lastSaveFailed).toBe(false);
+  });
+
+  it("a gravação detecta alteração externa mesmo sem passar por onFocus", async () => {
+    const { fs, state } = await setup({ debounceMs: 60_000 });
+    await state().openFolder(DIR);
+    await externalEdit(fs, "Do disco");
+    state().renameBoard("id-1", "Do app");
+    await state().flush();
+    expect(state().conflict).toBe(true);
+    expect(getBoard(await readFile(fs), "id-1").name).toBe("Do disco");
+  });
+
+  it("resolveConflict('app') grava a versão do app por cima após detecção na gravação", async () => {
+    const { fs, state } = await setup({ debounceMs: 60_000 });
+    await state().openFolder(DIR);
+    await externalEdit(fs, "Do disco");
+    state().renameBoard("id-1", "Do app");
+    await state().flush();
+    expect(state().conflict).toBe(true);
+
+    await state().resolveConflict("app");
+    expect(state().conflict).toBe(false);
+    expect(getBoard(await readFile(fs), "id-1").name).toBe("Do app");
+  });
+
+  it("onFocus depois de uma gravação que falhou verifica o disco antes de tentar de novo", async () => {
+    const { fs, state } = await setup();
+    await state().openFolder(DIR);
+    fs.failWrites = true;
+    state().renameBoard("id-1", "Tentativa");
+    await state().flush();
+    expect(state().saveStatus).toBe("error");
+
+    fs.failWrites = false;
+    await externalEdit(fs, "Do disco");
+    await state().onFocus();
+    expect(state().conflict).toBe(true);
+    expect(getBoard(await readFile(fs), "id-1").name).toBe("Do disco");
+  });
+
+  it("trocar de pasta com gravação falhando não perde as alterações", async () => {
+    const { fs, state } = await setup();
+    await state().openFolder(DIR);
+    state().renameBoard("id-1", "Não salvo");
+    fs.failWrites = true;
+    await fs.mkdir("/outra");
+
+    await state().openFolder("/outra");
+    expect(state().dataDir).toBe(DIR);
+    expect(state().phase).toBe("ready");
+    expect(getBoard(state().data, "id-1").name).toBe("Não salvo");
+    expect(state().notice).toBe(
+      "Não foi possível salvar as alterações na pasta atual. A troca de pasta foi cancelada.",
+    );
+  });
+
+  it("restoreBackup fora da tela de erro não faz nada", async () => {
+    const { state } = await setup();
+    await state().openFolder(DIR);
+    const before = state().data;
+    await state().restoreBackup();
+    expect(state().data).toEqual(before);
+    expect(state().notice).toBeNull();
+  });
+
+  it("falha ao lembrar a pasta não trava o app em 'booting'", async () => {
+    const fs = new MemoryFs();
+    await fs.mkdir(DIR);
+    const clock = fakeClock();
+    const settings = {
+      getDataDir: async () => null,
+      setDataDir: async () => {
+        throw new Error("disco cheio");
+      },
+    };
+    const deps: AppDeps = { fs, settings, clock, debounceMs: 1 };
+    const store = createAppStore(deps);
+
+    await store.getState().openFolder(DIR);
+    expect(store.getState().phase).toBe("ready");
+    expect(store.getState().notice).toContain("Não foi possível lembrar a pasta escolhida");
   });
 });
