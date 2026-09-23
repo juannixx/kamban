@@ -22,12 +22,12 @@ export function addBoard(data: KambanData, input: NewBoardInput): KambanData {
     id: input.id,
     name: requireText(input.name, "Nome do quadro"),
     order: nextOrder(data.boards),
-    archived: false,
     columns: [
       { id: todo, name: "A fazer", order: 0, isDone: false },
       { id: doing, name: "Fazendo", order: 1, isDone: false },
       { id: done, name: "Feito", order: 2, isDone: true },
     ],
+    archived: false,
   };
   return { ...data, boards: [...data.boards, board] };
 }
