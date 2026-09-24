@@ -19,6 +19,10 @@ App kanban pessoal para organizar to-dos, projetos pessoais e rotina. Uso indivi
 
 Busca, atalhos avançados de teclado, seletor manual de tema (a v1 segue o tema do macOS), streaks e gráficos de hábitos, etiquetas, uso simultâneo em dois computadores, sincronização com a nuvem, versão mobile, teste end-to-end do app empacotado, assinatura Apple do app.
 
+### Extensões depois da v1
+
+- Agenda do Google na tela Hoje (somente leitura): `docs/superpowers/specs/2026-09-24-agenda-google-design.md`. Muda a premissa para "sem login próprio e sem servidor próprio; conexão opcional com o Google".
+
 ## 2. Stack
 
 Tauri 2, React 19, TypeScript 6.0 (o typescript-eslint ainda não suporta a 7), Vite, Zustand, Zod, dnd-kit, Tailwind CSS, Vitest, React Testing Library, ESLint, pnpm.
