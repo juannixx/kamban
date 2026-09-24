@@ -3,8 +3,9 @@ import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryFs } from "../persistence/memoryFs";
+import { createAgendaStore } from "../store/agendaStore";
 import { createAppStore } from "../store/appStore";
-import { fakeClock, memorySettings } from "../store/testing";
+import { fakeCalendarService, fakeClock, memoryAgendaCache, memorySettings } from "../store/testing";
 import { App } from "./App";
 import { AppProvider } from "./context";
 import { fakePlatform } from "./testing";
@@ -13,9 +14,15 @@ afterEach(cleanup);
 
 async function renderApp(fs: MemoryFs, options: { dir?: string; pickFolder?: () => Promise<string | null> } = {}) {
   const store = createAppStore({ fs, settings: memorySettings(options.dir ?? null), clock: fakeClock(), debounceMs: 60_000 });
+  const agenda = createAgendaStore({
+    service: fakeCalendarService(),
+    settings: memorySettings(),
+    cache: memoryAgendaCache(),
+    clock: fakeClock(),
+  });
   const platform = fakePlatform(options.pickFolder ? { pickFolder: vi.fn(options.pickFolder) } : {});
   render(
-    <AppProvider store={store} platform={platform}>
+    <AppProvider store={store} agenda={agenda} platform={platform}>
       <App />
     </AppProvider>,
   );

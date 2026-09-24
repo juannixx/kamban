@@ -4,6 +4,7 @@ import { useApp } from "../context";
 import { formatDayLabel, formatShortDate } from "../format";
 import { PriorityBadge } from "../PriorityBadge";
 import { cardBox, sectionTitle } from "../styles";
+import { AgendaSection } from "./AgendaSection";
 
 export function TodayView() {
   const data = useApp((s) => s.data);
@@ -20,6 +21,8 @@ export function TodayView() {
         <h1 className="text-2xl font-semibold">Hoje</h1>
         <p className="text-sm text-zinc-500">{formatDayLabel(today)}</p>
       </header>
+
+      <AgendaSection />
 
       <section aria-label="Rotina">
         <div className="mb-2 flex items-baseline justify-between">
