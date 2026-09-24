@@ -1,3 +1,4 @@
+import type { AgendaColor } from "../domain/agenda";
 import { weekdayOf } from "../domain/dates";
 import { prioritySchema, type Priority } from "../domain/schema";
 
@@ -26,3 +27,21 @@ export function toPriority(value: string): Priority | undefined {
   const result = prioritySchema.safeParse(value);
   return result.success ? result.data : undefined;
 }
+
+export const AGENDA_COLOR_CLASS: Record<AgendaColor, string> = {
+  sky: "bg-sky-500",
+  violet: "bg-violet-500",
+  emerald: "bg-emerald-500",
+  amber: "bg-amber-500",
+  rose: "bg-rose-500",
+  teal: "bg-teal-500",
+};
+
+export const AGENDA_COLOR_NAME: Record<AgendaColor, string> = {
+  sky: "Azul",
+  violet: "Roxo",
+  emerald: "Verde",
+  amber: "Amarelo",
+  rose: "Rosa",
+  teal: "Turquesa",
+};

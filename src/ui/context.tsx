@@ -2,14 +2,28 @@ import { createContext, useContext, type ReactNode } from "react";
 import { useStore } from "zustand";
 import type { Platform } from "../platform/platform";
 import type { AppStore, AppStoreState } from "../store/appStore";
+import type { AgendaStore, AgendaStoreState } from "../store/agendaStore";
 
 const StoreContext = createContext<AppStore | null>(null);
 const PlatformContext = createContext<Platform | null>(null);
+const AgendaContext = createContext<AgendaStore | null>(null);
 
-export function AppProvider({ store, platform, children }: { store: AppStore; platform: Platform; children: ReactNode }) {
+export function AppProvider({
+  store,
+  agenda,
+  platform,
+  children,
+}: {
+  store: AppStore;
+  agenda: AgendaStore;
+  platform: Platform;
+  children: ReactNode;
+}) {
   return (
     <StoreContext.Provider value={store}>
-      <PlatformContext.Provider value={platform}>{children}</PlatformContext.Provider>
+      <AgendaContext.Provider value={agenda}>
+        <PlatformContext.Provider value={platform}>{children}</PlatformContext.Provider>
+      </AgendaContext.Provider>
     </StoreContext.Provider>
   );
 }
@@ -19,6 +33,13 @@ export function useApp<T>(selector: (state: AppStoreState) => T): T {
   const store = useContext(StoreContext);
   if (!store) throw new Error("useApp precisa estar dentro de AppProvider");
   return useStore(store, selector);
+}
+
+/** Mesmas regras do useApp: selecione só valores estáveis. */
+export function useAgenda<T>(selector: (state: AgendaStoreState) => T): T {
+  const agenda = useContext(AgendaContext);
+  if (!agenda) throw new Error("useAgenda precisa estar dentro de AppProvider");
+  return useStore(agenda, selector);
 }
 
 export function usePlatform(): Platform {
