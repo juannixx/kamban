@@ -131,6 +131,25 @@ describe("buildAgenda", () => {
     expect(buildAgenda(cache, [outra], "2026-09-24", now)).toEqual([]);
   });
 
+  it("nunca mostra títulos de uma conta em Só horários, mesmo com eventos no cache", () => {
+    const vazado: AgendaCache = {
+      date: "2026-09-24",
+      accounts: {
+        a2: {
+          fetchedAt: "2026-09-24T09:12:00.000Z",
+          items: [
+            event("Cliente X - audiência", "2026-09-24T13:00:00-03:00", "2026-09-24T14:00:00-03:00"),
+            { kind: "event", title: "Feriado do cliente", start: "2026-09-24", end: "2026-09-25", allDay: true },
+            busy("2026-09-24T14:00:00-03:00", "2026-09-24T15:00:00-03:00"),
+          ],
+        },
+      },
+    };
+    const rows = buildAgenda(vazado, [trabalho], "2026-09-24", now);
+    expect(rows.map((r) => [r.kind, r.title])).toEqual([["busy", "Ocupado (até 15:00)"]]);
+    expect(JSON.stringify(rows)).not.toMatch(/Cliente X|Feriado do cliente/);
+  });
+
   it("só mostra contas que ainda estão conectadas", () => {
     const rows = buildAgenda(cache, [trabalho], "2026-09-24", now);
     expect(rows.every((r) => r.accountId === "a2")).toBe(true);

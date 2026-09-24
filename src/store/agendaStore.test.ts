@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { dayBounds, type AgendaCache, type CalendarAccount } from "../domain/agenda";
+import { buildAgenda, dayBounds, type AgendaCache, type CalendarAccount } from "../domain/agenda";
 import { createAgendaStore, type CalendarService, type FetchRequest } from "./agendaStore";
 import { fakeCalendarService, fakeClock, memoryAgendaCache, memorySettings } from "./testing";
 
@@ -179,6 +179,52 @@ describe("contas", () => {
     await state().connect("busy");
     expect(settings.accounts).toHaveLength(1);
     expect(settings.accounts[0]).toMatchObject({ id: "a1", color: "rose", mode: "busy" });
+  });
+
+  it("reconectar como busy sem rede não mostra títulos", async () => {
+    const previous: AgendaCache = { date: TODAY, accounts: { a1: { fetchedAt: "x", items: [dentista] } } };
+    const fetchDay = vi.fn(async (requests: FetchRequest[]) =>
+      requests.map((r) => ({ email: r.email, error: { kind: "offline" as const } })),
+    );
+    const { clock, cache, state } = setup({ accounts: [pessoal], cache: previous, service: { fetchDay } });
+    await state().init();
+    expect(cache.current?.accounts.a1?.items).toEqual([dentista]);
+    await state().connect("busy");
+    expect(state().accounts[0]).toMatchObject({ id: "a1", mode: "busy" });
+    expect(cache.current?.accounts.a1).toBeUndefined();
+    expect(state().cache?.accounts.a1).toBeUndefined();
+    const rows = buildAgenda(state().cache, state().accounts, TODAY, new Date(clock.now()));
+    expect(JSON.stringify(rows)).not.toContain("Dentista");
+    expect(JSON.stringify(cache.current)).not.toContain("Dentista");
+  });
+
+  it("resultado de modo antigo durante mudança de modo é descartado", async () => {
+    let release: () => void = () => {};
+    const { service, cache, state } = setup({ accounts: [pessoal] });
+    await state().init();
+    const fetchDay = vi.mocked(service.fetchDay);
+    fetchDay.mockClear();
+    // A primeira busca (ainda em "details") fica pendente e responde com títulos;
+    // as seguintes (já em "busy") ficam sem rede.
+    fetchDay.mockImplementationOnce(
+      (requests: FetchRequest[]) =>
+        new Promise((resolve) => {
+          release = () => resolve(requests.map((r) => ({ email: r.email, items: [dentista] })));
+        }),
+    );
+    fetchDay.mockImplementation(async (requests: FetchRequest[]) =>
+      requests.map((r) => ({ email: r.email, error: { kind: "offline" as const } })),
+    );
+    const first = state().refresh();
+    await state().connect("busy");
+    expect(state().accounts[0]?.mode).toBe("busy");
+    release();
+    await first;
+    await vi.waitFor(() => expect(state().refreshing).toBe(false));
+    expect(fetchDay).toHaveBeenCalledTimes(2);
+    expect(fetchDay.mock.calls[1]?.[0]).toEqual([{ email: "pessoal@gmail.com", mode: "busy", calendarIds: ["primary"] }]);
+    expect(cache.current?.accounts.a1).toBeUndefined();
+    expect(JSON.stringify(state().cache)).not.toContain("Dentista");
   });
 
   it("erros ao conectar viram mensagem, e cancelar não mostra nada", async () => {

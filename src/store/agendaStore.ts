@@ -134,6 +134,15 @@ function requestFor(account: CalendarAccount): FetchRequest {
   };
 }
 
+function sameRequest(a: FetchRequest, b: FetchRequest): boolean {
+  return (
+    a.email === b.email &&
+    a.mode === b.mode &&
+    a.calendarIds.length === b.calendarIds.length &&
+    a.calendarIds.every((id, i) => id === b.calendarIds[i])
+  );
+}
+
 export function createAgendaStore(deps: AgendaDeps): AgendaStore {
   const { service, settings, clock } = deps;
   const staleAfterMs = deps.staleAfterMs ?? STALE_AFTER_MS;
@@ -152,6 +161,14 @@ export function createAgendaStore(deps: AgendaDeps): AgendaStore {
     async function saveCache(cache: AgendaCache) {
       set({ cache });
       await deps.cache.write(cache);
+    }
+
+    async function dropCachedAccount(accountId: string) {
+      const cache = get().cache;
+      if (!cache || !(accountId in cache.accounts)) return;
+      const accounts = { ...cache.accounts };
+      delete accounts[accountId];
+      await saveCache({ ...cache, accounts });
     }
 
     return {
@@ -205,6 +222,10 @@ export function createAgendaStore(deps: AgendaDeps): AgendaStore {
           for (const account of present) {
             const result = results.find((r) => r.email === account.email);
             if (!result) continue;
+            // O modo ou as agendas mudaram durante a busca: este resultado é do pedido antigo
+            // (pode ter títulos de uma conta que agora é "Só horários"). A próxima busca já está na fila.
+            const sent = requested.find((a) => a.id === account.id);
+            if (!sent || !sameRequest(requestFor(sent), requestFor(account))) continue;
             if (result.items) {
               entries[account.id] = { fetchedAt, items: result.items };
               status[account.id] = "ok";
@@ -275,6 +296,8 @@ export function createAgendaStore(deps: AgendaDeps): AgendaStore {
           const status = { ...get().status };
           delete status[account.id];
           set({ status });
+          // COMP-04: ao reconectar (por exemplo em "Só horários"), o cache antigo da conta pode ter títulos.
+          if (existing) await dropCachedAccount(existing.id);
           await get().refresh();
         } catch (error) {
           set({ message: connectErrorMessage(toAgendaError(error)) });
@@ -298,12 +321,7 @@ export function createAgendaStore(deps: AgendaDeps): AgendaStore {
         const status = { ...get().status };
         delete status[accountId];
         set({ status });
-        const cache = get().cache;
-        if (cache) {
-          const accounts = { ...cache.accounts };
-          delete accounts[accountId];
-          await saveCache({ ...cache, accounts });
-        }
+        await dropCachedAccount(accountId);
       },
 
       async toggleCalendar(accountId, calendarId) {

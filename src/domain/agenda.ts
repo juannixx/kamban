@@ -112,7 +112,9 @@ export function buildAgenda(
   accounts.forEach((account, accountIndex) => {
     const entry = cache.accounts[account.id];
     if (!entry) return;
-    const items = [...entry.items.filter((i) => i.kind === "event"), ...mergeBusy(entry.items)];
+    // COMP-04: conta em "Só horários" nunca mostra eventos com título, mesmo que o cache tenha algum.
+    const events = account.mode === "busy" ? [] : entry.items.filter((i) => i.kind === "event");
+    const items = [...events, ...mergeBusy(entry.items)];
     items.forEach((item, index) => {
       const key = `${account.id}:${item.kind}:${item.start}:${index}`;
       const base = { key, accountId: account.id, accountEmail: account.email, color: account.color, kind: item.kind };
