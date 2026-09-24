@@ -1,6 +1,8 @@
 use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
 use tauri::Manager;
 
+mod google;
+
 /// Id do item "Encerrar Kamban" do menu do app.
 const QUIT_ID: &str = "quit";
 

@@ -27,3 +27,10 @@ tauri-plugin-fs = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-store = "2"
 tauri-plugin-opener = "2"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+keyring = { version = "3", features = ["apple-native"] }
+sha2 = "0.10"
+base64 = "0.22"
+getrandom = "0.2"
+url = "2"
+tokio = { version = "1", features = ["net", "io-util", "time", "sync"] }
