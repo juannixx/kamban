@@ -34,6 +34,14 @@ pub fn scopes(mode: Mode) -> &'static str {
   }
 }
 
+/// Escopo da agenda que o modo precisa; sem ele a conta não funciona.
+pub fn calendar_scope(mode: Mode) -> &'static str {
+  match mode {
+    Mode::Details => "https://www.googleapis.com/auth/calendar.readonly",
+    Mode::Busy => "https://www.googleapis.com/auth/calendar.freebusy",
+  }
+}
+
 pub struct Client {
   pub id: &'static str,
   pub secret: &'static str,
@@ -145,4 +153,18 @@ pub async fn authorize(app: &AppHandle, http: &reqwest::Client, mode: Mode) -> R
   let status = response.status().as_u16();
   let body = response.text().await.map_err(|e| from_reqwest(&e))?;
   parse_token_response(status, &body)
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use crate::google::parse::has_scope;
+
+  #[test]
+  fn escopo_da_agenda_faz_parte_dos_escopos_pedidos() {
+    assert!(has_scope(scopes(Mode::Details), calendar_scope(Mode::Details)));
+    assert!(has_scope(scopes(Mode::Busy), calendar_scope(Mode::Busy)));
+    assert!(!has_scope(scopes(Mode::Busy), calendar_scope(Mode::Details)));
+    assert!(!has_scope(scopes(Mode::Details), calendar_scope(Mode::Busy)));
+  }
 }

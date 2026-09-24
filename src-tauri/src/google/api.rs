@@ -49,7 +49,7 @@ impl GoogleState {
 
   async fn refresh_access(&self, email: &str) -> Result<String, GoogleError> {
     let client = oauth::client()?;
-    let refresh = keychain::load(email)?.ok_or(GoogleError::Revoked)?;
+    let refresh = keychain::load(email).await?.ok_or(GoogleError::Revoked)?;
     let response = self
       .http
       .post(TOKEN_URL)

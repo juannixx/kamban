@@ -51,6 +51,14 @@ pub struct TokenResponse {
   pub expires_in: u64,
   pub refresh_token: Option<String>,
   pub id_token: Option<String>,
+  /// Escopos concedidos, separados por espaço. Com o consentimento granular o usuário pode
+  /// desmarcar a permissão da agenda e o login ainda assim termina com sucesso.
+  pub scope: Option<String>,
+}
+
+/// `required` aparece exatamente na lista de escopos concedidos (separados por espaço).
+pub fn has_scope(granted: &str, required: &str) -> bool {
+  granted.split_whitespace().any(|scope| scope == required)
 }
 
 #[derive(Deserialize)]
@@ -270,6 +278,27 @@ mod tests {
   }
 
   #[test]
+  fn resposta_de_token_guarda_os_escopos_concedidos() {
+    let com = parse_token_response(200, r#"{"access_token":"at","expires_in":1,"scope":"openid email"}"#).unwrap();
+    assert_eq!(com.scope.as_deref(), Some("openid email"));
+    let sem = parse_token_response(200, r#"{"access_token":"at","expires_in":1}"#).unwrap();
+    assert_eq!(sem.scope, None);
+  }
+
+  #[test]
+  fn has_scope_exige_o_escopo_exato() {
+    let granted = "openid https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/calendar.freebusy";
+    assert!(has_scope(granted, "https://www.googleapis.com/auth/calendar.freebusy"));
+    assert!(has_scope(granted, "openid"));
+    assert!(!has_scope(granted, "https://www.googleapis.com/auth/calendar.readonly"));
+    assert!(!has_scope(granted, "https://www.googleapis.com/auth/calendar"));
+    assert!(!has_scope("https://www.googleapis.com/auth/calendar.readonly.extra", "https://www.googleapis.com/auth/calendar.readonly"));
+    assert!(has_scope("  a   b ", "b"));
+    assert!(!has_scope("", "openid"));
+    assert!(!has_scope("openid", ""));
+  }
+
+  #[test]
   fn email_do_id_token() {
     let payload = URL_SAFE_NO_PAD.encode(r#"{"email":"pessoa@gmail.com","sub":"1"}"#);
     assert_eq!(email_from_id_token(&format!("h.{payload}.s")), Some("pessoa@gmail.com".into()));
@@ -317,7 +346,7 @@ mod tests {
         all_day: false,
       }
     );
-    assert_eq!(items[1].all_day, true);
+    assert!(items[1].all_day);
     assert_eq!(items[1].start, "2026-09-24");
     assert_eq!(items[2].title.as_deref(), Some("(sem título)"));
     assert_eq!(items[3].title.as_deref(), Some("(sem título)"));
