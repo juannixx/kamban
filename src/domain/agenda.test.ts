@@ -17,7 +17,11 @@ function useTimezone(tz: string) {
     process.env.TZ = tz;
   });
   afterEach(() => {
-    process.env.TZ = originalTz;
+    if (originalTz === undefined) {
+      delete process.env.TZ;
+    } else {
+      process.env.TZ = originalTz;
+    }
   });
 }
 
@@ -46,6 +50,16 @@ describe("dayBounds", () => {
     it("dia de 23 horas muda o deslocamento no fim", () => {
       expect(dayBounds("2026-03-08")).toEqual({ start: "2026-03-08T00:00:00-05:00", end: "2026-03-09T00:00:00-04:00" });
     });
+  });
+});
+
+describe("depois de useTimezone", () => {
+  it("restaura o TZ original, sem deixar a string 'undefined'", () => {
+    if (originalTz === undefined) {
+      expect("TZ" in process.env).toBe(false);
+    } else {
+      expect(process.env.TZ).toBe(originalTz);
+    }
   });
 });
 
