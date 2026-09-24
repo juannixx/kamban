@@ -38,6 +38,13 @@ pub fn parse_callback(request_line: &str) -> Option<Callback> {
   }
 }
 
+/// Verdadeiro só quando o `state` do retorno bate com o gerado antes do login. Callbacks com
+/// state errado ou ausente são ignorados: uma aba ou requisição qualquer (ex.: `<img>` de outra
+/// página) não pode confirmar nem abortar o login de outra pessoa.
+pub fn is_expected_callback(callback: &Callback, expected_state: &str) -> bool {
+  callback.state.as_deref() == Some(expected_state)
+}
+
 #[derive(Debug, Deserialize)]
 pub struct TokenResponse {
   pub access_token: String,
@@ -216,6 +223,18 @@ pub fn freebusy_to_items(body: &str) -> Result<Vec<RawItem>, GoogleError> {
 mod tests {
   use super::*;
   use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+
+  #[test]
+  fn is_expected_callback_so_aceita_o_state_esperado() {
+    let com_code = Callback { code: Some("abc".into()), state: Some("xyz".into()), error: None };
+    let com_erro = Callback { code: None, state: Some("xyz".into()), error: Some("access_denied".into()) };
+    let state_errado = Callback { code: Some("abc".into()), state: Some("outro".into()), error: None };
+    let sem_state = Callback { code: Some("abc".into()), state: None, error: None };
+    assert!(is_expected_callback(&com_code, "xyz"));
+    assert!(is_expected_callback(&com_erro, "xyz"));
+    assert!(!is_expected_callback(&state_errado, "xyz"));
+    assert!(!is_expected_callback(&sem_state, "xyz"));
+  }
 
   #[test]
   fn callback_com_code_state_e_erro() {

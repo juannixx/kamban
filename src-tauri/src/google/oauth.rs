@@ -8,13 +8,17 @@ use tokio::net::TcpListener;
 use url::Url;
 
 use super::errors::{classify_oauth_error, from_reqwest, GoogleError};
-use super::parse::{parse_callback, parse_token_response, Callback, TokenResponse};
+use super::parse::{is_expected_callback, parse_callback, parse_token_response, Callback, TokenResponse};
 use super::pkce::{challenge, random_token};
 
 pub const AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 pub const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 pub const REVOKE_URL: &str = "https://oauth2.googleapis.com/revoke";
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(300);
+/// Tempo máximo para ler cada conexão aceita no servidor local do login. Sem isso, uma conexão
+/// que abre e não manda dados (ex.: preconexão do navegador) trava o loop e o retorno de
+/// verdade nunca é aceito.
+const CALLBACK_READ_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -55,21 +59,29 @@ async fn respond(stream: &mut tokio::net::TcpStream, status: &str, body: &str) {
   let _ = stream.shutdown().await;
 }
 
-async fn wait_for_callback(listener: &TcpListener) -> Result<Callback, GoogleError> {
+async fn wait_for_callback(listener: &TcpListener, expected_state: &str) -> Result<Callback, GoogleError> {
   loop {
     let (mut stream, _) = listener
       .accept()
       .await
       .map_err(|e| GoogleError::Other(format!("Servidor local do login falhou: {e}")))?;
     let mut buf = vec![0u8; 8192];
-    let read = stream.read(&mut buf).await.unwrap_or(0);
+    let read = match tokio::time::timeout(CALLBACK_READ_TIMEOUT, stream.read(&mut buf)).await {
+      Ok(Ok(read)) => read,
+      // Timeout (ex.: preconexão do navegador que nunca manda dados) ou erro de leitura: descarta
+      // essa conexão e continua esperando o retorno de verdade, sem travar o login inteiro.
+      _ => continue,
+    };
     let text = String::from_utf8_lossy(&buf[..read]);
     match parse_callback(text.lines().next().unwrap_or("")) {
-      Some(callback) => {
+      Some(callback) if is_expected_callback(&callback, expected_state) => {
         let page = if callback.error.is_some() { PAGE_ERROR } else { PAGE_OK };
         respond(&mut stream, "200 OK", page).await;
         return Ok(callback);
       }
+      // GET com formato de retorno, mas state errado ou ausente: outra aba ou requisição não
+      // pode confirmar nem abortar o login. Responde e continua esperando o retorno de verdade.
+      Some(_) => respond(&mut stream, "400 Bad Request", "").await,
       None => respond(&mut stream, "404 Not Found", "").await,
     }
   }
@@ -106,14 +118,12 @@ pub async fn authorize(app: &AppHandle, http: &reqwest::Client, mode: Mode) -> R
     .open_url(url.as_str(), None::<&str>)
     .map_err(|e| GoogleError::Other(format!("Não foi possível abrir o navegador: {e}")))?;
 
-  let callback = tokio::time::timeout(LOGIN_TIMEOUT, wait_for_callback(&listener))
+  let callback = tokio::time::timeout(LOGIN_TIMEOUT, wait_for_callback(&listener, &state))
     .await
     .map_err(|_| GoogleError::Timeout)??;
+  // wait_for_callback só devolve um Callback cujo state já bate com o esperado.
   if let Some(error) = callback.error {
     return Err(classify_oauth_error(&error));
-  }
-  if callback.state.as_deref() != Some(state.as_str()) {
-    return Err(GoogleError::Other("Resposta de login inválida. Tente conectar de novo.".into()));
   }
   let code = callback
     .code

@@ -69,12 +69,14 @@ impl GoogleState {
     Ok(tokens.access_token)
   }
 
-  /// Envia a requisição com o token de acesso; num 401 renova uma vez e repete.
-  async fn send(
+  /// Envia a requisição com o token de acesso; num 401 renova uma vez e repete. Um 404 (recurso
+  /// não encontrado ou sem acesso, ex.: agenda da qual a conta cancelou a inscrição) devolve
+  /// `Ok(None)` em vez de erro, para o chamador decidir se pula ou falha.
+  async fn send_optional(
     &self,
     email: &str,
     build: impl Fn(&reqwest::Client, &str) -> reqwest::RequestBuilder,
-  ) -> Result<String, GoogleError> {
+  ) -> Result<Option<String>, GoogleError> {
     let mut token = self.access_token(email).await?;
     for attempt in 0..2 {
       let response = build(&self.http, &token).send().await.map_err(|e| from_reqwest(&e))?;
@@ -87,14 +89,30 @@ impl GoogleState {
         }
         return Err(GoogleError::Revoked);
       }
+      if status == StatusCode::NOT_FOUND {
+        return Ok(None);
+      }
       let body = response.text().await.map_err(|e| from_reqwest(&e))?;
       if !status.is_success() {
         let snippet: String = body.chars().take(200).collect();
         return Err(GoogleError::Other(format!("O Google respondeu {}: {snippet}", status.as_u16())));
       }
-      return Ok(body);
+      return Ok(Some(body));
     }
     Err(GoogleError::Revoked)
+  }
+
+  /// Como `send_optional`, mas um 404 também é erro (usado quando não há o que pular, ex.: listar
+  /// as agendas ou consultar disponibilidade).
+  async fn send(
+    &self,
+    email: &str,
+    build: impl Fn(&reqwest::Client, &str) -> reqwest::RequestBuilder,
+  ) -> Result<String, GoogleError> {
+    self
+      .send_optional(email, build)
+      .await?
+      .ok_or_else(|| GoogleError::Other("O Google respondeu 404: recurso não encontrado.".into()))
   }
 
   pub async fn list_calendars(&self, email: &str) -> Result<Vec<CalendarInfo>, GoogleError> {
@@ -127,7 +145,11 @@ impl GoogleState {
         .append_pair("orderBy", "startTime")
         .append_pair("maxResults", "250")
         .append_pair("fields", "items(summary,status,start,end)");
-      let body = self.send(email, |http, token| http.get(url.as_str()).bearer_auth(token)).await?;
+      // 404 (agenda não encontrada ou sem acesso, ex.: cancelou a inscrição) pula essa agenda
+      // sem falhar as outras selecionadas para a mesma conta.
+      let Some(body) = self.send_optional(email, |http, token| http.get(url.as_str()).bearer_auth(token)).await? else {
+        continue;
+      };
       items.extend(events_to_items(&body)?);
     }
     Ok(items)
