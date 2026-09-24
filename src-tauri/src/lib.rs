@@ -44,6 +44,14 @@ fn build_menu(app: &tauri::App) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
+    .manage(google::api::GoogleState::new())
+    .invoke_handler(tauri::generate_handler![
+      google::commands::google_is_configured,
+      google::commands::google_connect,
+      google::commands::google_disconnect,
+      google::commands::google_list_calendars,
+      google::commands::google_fetch_day,
+    ])
     .plugin(tauri_plugin_fs::init())
     .plugin(tauri_plugin_dialog::init())
     .plugin(tauri_plugin_store::Builder::new().build())
