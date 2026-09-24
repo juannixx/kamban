@@ -31,8 +31,9 @@ export function toAgendaError(error: unknown): AgendaError {
 export function connectErrorMessage(error: AgendaError): string | null {
   switch (error.kind) {
     case "cancelled":
-    case "timeout":
       return null;
+    case "timeout":
+      return "O login não foi concluído em 5 minutos. Se o Google disse que o administrador bloqueou o app, peça à TI para liberar o Kamban.";
     case "adminBlocked":
       return "O administrador da conta bloqueou este app. Peça à TI para liberar o Kamban.";
     case "notConfigured":
@@ -84,7 +85,7 @@ export interface AgendaCacheStore {
   write(cache: AgendaCache): Promise<void>;
 }
 
-export type AccountStatus = "ok" | "offline" | "revoked";
+export type AccountStatus = "ok" | "offline" | "revoked" | "error";
 
 export interface AgendaDeps {
   service: CalendarService;
@@ -100,6 +101,8 @@ export interface AgendaState {
   accounts: CalendarAccount[];
   cache: AgendaCache | null;
   status: Record<string, AccountStatus>;
+  /** Mensagem do último erro de leitura de cada conta com status "error" (id da conta → mensagem). */
+  errors: Record<string, string>;
   lastRefreshAt: string | null;
   refreshing: boolean;
   connecting: boolean;
@@ -177,6 +180,7 @@ export function createAgendaStore(deps: AgendaDeps): AgendaStore {
       accounts: [],
       cache: null,
       status: {},
+      errors: {},
       lastRefreshAt: null,
       refreshing: false,
       connecting: false,
@@ -211,12 +215,14 @@ export function createAgendaStore(deps: AgendaDeps): AgendaStore {
           try {
             results = await service.fetchDay(requested.map(requestFor), start, end);
           } catch (error) {
-            const failure = toAgendaError(error);
+            // A chamada inteira falhou (antes de falar com o Google): trata como sem conexão.
+            const failure: AgendaError = { kind: "offline", message: toAgendaError(error).message };
             results = requested.map((a) => ({ email: a.email, error: failure }));
           }
           const current = get().cache;
           const entries = { ...(current?.date === today ? current.accounts : {}) };
           const status = { ...get().status };
+          const errors = { ...get().errors };
           const fetchedAt = clock.now();
           const present = get().accounts;
           for (const account of present) {
@@ -226,21 +232,27 @@ export function createAgendaStore(deps: AgendaDeps): AgendaStore {
             // (pode ter títulos de uma conta que agora é "Só horários"). A próxima busca já está na fila.
             const sent = requested.find((a) => a.id === account.id);
             if (!sent || !sameRequest(requestFor(sent), requestFor(account))) continue;
+            delete errors[account.id];
+            const kind = result.error?.kind;
             if (result.items) {
               entries[account.id] = { fetchedAt, items: result.items };
               status[account.id] = "ok";
-            } else if (result.error?.kind === "revoked") {
+            } else if (kind === "revoked") {
               delete entries[account.id];
               status[account.id] = "revoked";
-            } else {
+            } else if (kind === "offline" || kind === "timeout") {
               status[account.id] = "offline";
+            } else {
+              status[account.id] = "error";
+              errors[account.id] = `Não foi possível ler a agenda: ${result.error?.message ?? kind ?? "erro desconhecido"}`;
             }
           }
           const ids = new Set(present.map((a) => a.id));
           for (const id of Object.keys(entries)) if (!ids.has(id)) delete entries[id];
           for (const id of Object.keys(status)) if (!ids.has(id)) delete status[id];
+          for (const id of Object.keys(errors)) if (!ids.has(id)) delete errors[id];
           await saveCache({ date: today, accounts: entries });
-          set({ status, lastRefreshAt: fetchedAt, now: fetchedAt });
+          set({ status, errors, lastRefreshAt: fetchedAt, now: fetchedAt });
         } finally {
           set({ refreshing: false });
           if (refreshAgain) {
@@ -295,7 +307,9 @@ export function createAgendaStore(deps: AgendaDeps): AgendaStore {
           await saveAccounts(existing ? accounts.map((a) => (a.id === existing.id ? account : a)) : [...accounts, account]);
           const status = { ...get().status };
           delete status[account.id];
-          set({ status });
+          const errors = { ...get().errors };
+          delete errors[account.id];
+          set({ status, errors });
           // COMP-04: ao reconectar (por exemplo em "Só horários"), o cache antigo da conta pode ter títulos.
           if (existing) await dropCachedAccount(existing.id);
           await get().refresh();
@@ -320,7 +334,9 @@ export function createAgendaStore(deps: AgendaDeps): AgendaStore {
         await saveAccounts(get().accounts.filter((a) => a.id !== accountId));
         const status = { ...get().status };
         delete status[accountId];
-        set({ status });
+        const errors = { ...get().errors };
+        delete errors[accountId];
+        set({ status, errors });
         await dropCachedAccount(accountId);
       },
 
@@ -332,6 +348,8 @@ export function createAgendaStore(deps: AgendaDeps): AgendaStore {
               : a,
           ),
         );
+        // Sem rede, a agenda desmarcada não pode continuar aparecendo pelo cache.
+        await dropCachedAccount(accountId);
         await get().refresh();
       },
 

@@ -20,6 +20,8 @@ export function agendaStatusText(
 ): string {
   const revoked = accounts.find((a) => status[a.id] === "revoked");
   if (revoked) return `reconecte a conta ${revoked.email}`;
+  const failed = accounts.find((a) => status[a.id] === "error");
+  if (failed) return `erro na conta ${failed.email}`;
   const offline = accounts.filter((a) => status[a.id] === "offline");
   if (offline.length > 0) {
     const times = offline

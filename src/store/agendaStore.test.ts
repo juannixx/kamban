@@ -79,6 +79,33 @@ describe("init e refresh", () => {
     expect(cache.current?.accounts.a1).toBeUndefined();
   });
 
+  it("erro que não é de rede nem revogação marca 'error' com a mensagem e mantém o cache", async () => {
+    const previous: AgendaCache = { date: TODAY, accounts: { a1: { fetchedAt: "x", items: [dentista] } } };
+    const fetchDay = vi.fn<CalendarService["fetchDay"]>(async () => [
+      { email: "pessoal@gmail.com", error: { kind: "other", message: "Google respondeu 403: acesso negado" } },
+      { email: "voce@yousalaw.com", error: { kind: "timeout" } },
+    ]);
+    const { cache, state, settings } = setup({ accounts: [pessoal, trabalho], cache: previous, service: { fetchDay } });
+    await state().init();
+    expect(state().status).toEqual({ a1: "error", a2: "offline" });
+    expect(state().errors).toEqual({ a1: "Não foi possível ler a agenda: Google respondeu 403: acesso negado" });
+    expect(cache.current?.accounts.a1).toEqual(previous.accounts.a1);
+    fetchDay.mockImplementation(async () => [
+      { email: "pessoal@gmail.com", items: [dentista] },
+      { email: "voce@yousalaw.com", items: [] },
+    ]);
+    await state().refresh();
+    expect(state().status).toEqual({ a1: "ok", a2: "ok" });
+    expect(state().errors).toEqual({});
+    fetchDay.mockImplementation(async () => [{ email: "pessoal@gmail.com", error: { kind: "notConfigured" } }]);
+    await state().refresh();
+    expect(state().status.a1).toBe("error");
+    expect(state().errors.a1).toBe("Não foi possível ler a agenda: notConfigured");
+    await state().disconnect("a1");
+    expect(state().errors).toEqual({});
+    expect(settings.accounts.map((a) => a.id)).toEqual(["a2"]);
+  });
+
   it("falha inesperada do serviço marca todas como sem conexão", async () => {
     const fetchDay = vi.fn(async () => {
       throw new Error("ipc caiu");
@@ -237,6 +264,11 @@ describe("contas", () => {
     connect.mockRejectedValueOnce({ kind: "cancelled" });
     await state().connect("busy");
     expect(state().message).toBeNull();
+    connect.mockRejectedValueOnce({ kind: "timeout" });
+    await state().connect("busy");
+    expect(state().message).toBe(
+      "O login não foi concluído em 5 minutos. Se o Google disse que o administrador bloqueou o app, peça à TI para liberar o Kamban.",
+    );
     connect.mockRejectedValueOnce(new Error("estranho"));
     await state().connect("busy");
     expect(state().message).toBe("Não foi possível conectar: estranho");
@@ -261,6 +293,20 @@ describe("contas", () => {
     expect(vi.mocked(service.fetchDay).mock.calls.at(-1)?.[0]).toEqual([
       { email: "pessoal@gmail.com", mode: "details", calendarIds: ["primary", "feriados"] },
     ]);
+  });
+
+  it("desmarcar uma agenda sem rede tira os eventos dela do cache", async () => {
+    const previous: AgendaCache = { date: TODAY, accounts: { a1: { fetchedAt: "x", items: [dentista] } } };
+    const fetchDay = vi.fn(async (requests: FetchRequest[]) =>
+      requests.map((r) => ({ email: r.email, error: { kind: "offline" as const } })),
+    );
+    const { cache, state } = setup({ accounts: [pessoal], cache: previous, service: { fetchDay } });
+    await state().init();
+    expect(cache.current?.accounts.a1?.items).toEqual([dentista]);
+    await state().toggleCalendar("a1", "primary");
+    expect(state().accounts[0]?.calendars.map((c) => c.selected)).toEqual([false, false]);
+    expect(cache.current?.accounts.a1).toBeUndefined();
+    expect(state().cache?.accounts.a1).toBeUndefined();
   });
 
   it("trocar a cor grava", async () => {

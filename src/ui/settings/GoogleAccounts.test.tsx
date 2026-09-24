@@ -89,6 +89,22 @@ describe("GoogleAccounts", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
+  it("conta com erro de leitura mostra a mensagem", async () => {
+    await setupApp(<GoogleAccounts />, {
+      agenda: {
+        accounts: [pessoal],
+        service: {
+          fetchDay: vi.fn(async () => [
+            { email: "pessoal@gmail.com", error: { kind: "other" as const, message: "Google respondeu 403" } },
+          ]),
+        },
+      },
+    });
+    const message = accountsList().getByText("Não foi possível ler a agenda: Google respondeu 403");
+    expect(message.tagName).toBe("P");
+    expect(message.className).toContain("text-red");
+  });
+
   it("conta com permissão expirada oferece reconectar no mesmo modo", async () => {
     const { user, agendaService } = await setupApp(<GoogleAccounts />, {
       agenda: {

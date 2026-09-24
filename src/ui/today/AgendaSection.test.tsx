@@ -78,6 +78,18 @@ describe("AgendaSection", () => {
     expect(screen.getByText("Nenhum evento hoje.")).toBeTruthy();
   });
 
+  it("erro de leitura numa conta mostra qual conta, e clicar atualiza", async () => {
+    const fetchDay = vi.fn(async () => [
+      { email: "pessoal@gmail.com", items: items.a1 },
+      { email: "voce@yousalaw.com", error: { kind: "other" as const, message: "Google respondeu 403" } },
+    ]);
+    const { user, agendaService } = await setupApp(<AgendaSection />, {
+      agenda: { accounts: [pessoal, trabalho], service: { fetchDay } },
+    });
+    await user.click(screen.getByRole("button", { name: "erro na conta voce@yousalaw.com" }));
+    await waitFor(() => expect(agendaService.fetchDay).toHaveBeenCalledTimes(2));
+  });
+
   it("clicar no status atualiza de novo", async () => {
     const { user, agendaService } = await setupApp(<AgendaSection />, {
       agenda: { accounts: [pessoal], service: { fetchDay: fetchAll() } },

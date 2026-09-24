@@ -80,6 +80,7 @@ export function GoogleAccounts() {
 
 function AccountRow({ account }: { account: CalendarAccount }) {
   const status = useAgenda((s) => s.status[account.id]);
+  const error = useAgenda((s) => s.errors[account.id]);
   const connect = useAgenda((s) => s.connect);
   const disconnect = useAgenda((s) => s.disconnect);
   const toggleCalendar = useAgenda((s) => s.toggleCalendar);
@@ -122,6 +123,7 @@ function AccountRow({ account }: { account: CalendarAccount }) {
           </button>
         </div>
       )}
+      {status === "error" && error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
       {account.mode === "details" && (
         <fieldset className="space-y-1">
           <legend className="text-xs text-zinc-500">Agendas</legend>
