@@ -1,0 +1,35 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  release:
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+      - run: pnpm install --frozen-lockfile
+      - uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "Kamban ${{ github.ref_name }}"
+          releaseBody: "Baixe o arquivo .dmg abaixo e arraste o Kamban para Aplicativos. O app não tem assinatura da Apple: na primeira abertura, se o macOS bloquear, vá em Ajustes do Sistema > Privacidade e Segurança e clique em Abrir Mesmo Assim."
+          releaseDraft: false
+          prerelease: false
+          args: --target universal-apple-darwin
