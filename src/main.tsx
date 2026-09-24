@@ -3,6 +3,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { StrictMode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import "./index.css";
+import { attachAgendaLifecycle } from "./platform/agendaLifecycle";
 import { systemClock } from "./platform/clock";
 import { tauriCalendarService } from "./platform/googleCalendar";
 import { createTauriSettings } from "./platform/settings";
@@ -41,7 +42,9 @@ async function start() {
     </StrictMode>,
   );
   await attachWindowLifecycle(store, getCurrentWindow(), tauriPlatform.confirm);
+  await attachAgendaLifecycle(agenda, getCurrentWindow());
   await store.getState().boot();
+  void agenda.getState().init();
 }
 
 start().catch((error: unknown) => {

@@ -1,6 +1,7 @@
 import { BACKUP_DIR, joinPath } from "../../persistence/fs";
 import { useApp, usePlatform } from "../context";
 import { btn, cardBox, sectionTitle } from "../styles";
+import { GoogleAccounts } from "./GoogleAccounts";
 
 export function SettingsView() {
   const dataDir = useApp((s) => s.dataDir);
@@ -47,6 +48,7 @@ export function SettingsView() {
           O app guarda uma cópia por dia em backups/, dentro da pasta, e mantém os últimos 14 dias.
         </p>
       </section>
+      <GoogleAccounts />
     </div>
   );
 }
